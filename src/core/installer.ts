@@ -316,7 +316,7 @@ async function installAgyPluginManifest(targetDir: string, provider: string): Pr
   const manifest = {
     id: 'hiddink-harness-harness',
     name: 'Hiddink Harness for Antigravity',
-    version: '0.146.0',
+    version: '0.0.1',
     description:
       'Universal Agent Harness for managing custom agents, skills, and rules on agy runtime.',
     entry: 'AGY.md',

@@ -3,7 +3,7 @@
   "workspaces": [
     "packages/*"
   ],
-  "version": "0.146.0",
+  "version": "0.0.1",
   "description": "Universal agent harness for Claude Code, agy, gpt-codex, and Kimi",
   "type": "module",
   "bin": {
