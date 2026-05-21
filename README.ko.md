@@ -15,7 +15,7 @@ Claude Code, agy, gpt-codex, Kimi를 위한 범용 에이전트 하네스.
 ## 핵심 기능
 
 1. **멀티 프로바이더 공존**: 각 에이전트는 자체 네이티브 디렉토리 구조(`.claude/`, `.agy/` 등)를 유지합니다. `hiddink-harness`는 `templates/` 하위의 단일 SSOT에서 이 모든 구조를 관리하여 충돌을 원천 차단합니다.
-2. **SSOT 기반 자동 마운트**: 에이전트 정의, 행동 규칙, 스킬, 가이드는 전역 SSOT에 한 번만 존재하며, CLI 진입 시 현재 작업 디렉터리에 심볼릭 링크로 마운트되고 종료 시 정리됩니다. `hiddink-harness init`은 선택 사항으로, SSOT에 템플릿을 시드할 때만 사용합니다.
+2. **SSOT 기반 자동 마운트**: 에이전트 정의, 행동 규칙, 스킬, 가이드는 전역 SSOT에 한 번만 존재하며, CLI 진입 시 현재 작업 디렉터리에 심볼릭 링크로 마운트되고 종료 시 정리됩니다. 템플릿은 최초 실행 시 자동으로 시드되며, 업데이트는 `npm update -g hiddink-harness`로 적용됩니다.
 3. **다국어 지원**: 에이전트 템플릿과 CLI 출력에 한국어/영어 로케일이 지원됩니다. 설정을 분기하지 않고도 개발자별 언어 선호를 반영할 수 있습니다.
 4. **stdio 기반 MCP**: 내장 MCP 서버가 stdio 서브프로세스로 동작하여 네트워크 포트 충돌을 없애고 보안 경계를 단순하게 유지합니다.
 5. **Hub 아키텍처**: `ConversationHub`와 `ProviderAdapter` 패턴이 세 가지 라이프사이클을 처리합니다 — persistent-bidirectional (Claude/Kimi), per-turn-resume (Codex), PTY-wrap (agy, Phase 2).
@@ -52,7 +52,7 @@ cd any-directory          # init 불필요
 hiddink-harness           # 이 CWD를 위한 전역 SSOT 자동 마운트
 ```
 
-CLI는 CWD 경로에서 결정적 프로젝트 ID를 도출하여 `.claude/`, `.agy/`, `.omx/`, `.kimi/`를 `~/.hiddink-harness/projects/{projectId}/`를 가리키는 심볼릭 링크로 마운트합니다. 템플릿(에이전트, 스킬, 규칙, 가이드)을 SSOT에 시드하려면 `hiddink-harness init`을 한 번 실행하세요. 동일 디렉터리에서의 이후 호출은 같은 SSOT를 재사용합니다.
+CLI는 CWD 경로에서 결정적 프로젝트 ID를 도출하여 `.claude/`, `.agy/`, `.omx/`, `.kimi/`를 `~/.hiddink-harness/projects/{projectId}/`를 가리키는 심볼릭 링크로 마운트합니다. 템플릿(에이전트, 스킬, 규칙, 가이드)은 최초 실행 시 자동으로 시드됩니다. 업데이트는 `npm update -g hiddink-harness`로 적용됩니다.
 
 ---
 
@@ -60,18 +60,13 @@ CLI는 CWD 경로에서 결정적 프로젝트 ID를 도출하여 `.claude/`, `.
 
 | 명령어 | 설명 |
 |--------|------|
-| `hiddink-harness init` | 이 CWD를 위해 템플릿을 전역 SSOT에 시드 (선택; 자동 마운트는 init 없이도 동작) |
-| `hiddink-harness update` | 최신 설치 버전에서 템플릿 동기화 |
-| `hiddink-harness list` | 배포된 에이전트, 스킬, 규칙, 가이드 목록 출력 |
-| `hiddink-harness doctor` | 설치 및 설정 상태 진단 |
-| `hiddink-harness security` | 보안 감사 실행 |
-| `hiddink-harness web start\|stop\|status\|open` | 웹 대시보드 관리 |
-| `hiddink-harness serve` / `serve-stop` | 로컬 서버 시작 또는 중지 |
-| `hiddink-harness projects` | 등록된 프로젝트 목록 출력 |
-| `hiddink-harness unregister [path]` | 등록된 프로젝트 제거 |
-| `hiddink-harness mcp-serve` | stdio를 통한 내장 MCP 서버 실행 |
+| `hiddink-harness` | 이 CWD의 전역 SSOT 자동 마운트 및 TUI 대시보드 실행 |
+| `hiddink-harness list [type] [--format] [--verbose]` | 배포된 에이전트, 스킬, 규칙, 가이드 목록 출력 |
+| `hiddink-harness sync` | SSOT 상태 동기화 |
+| `hiddink-harness doctor [--fix] [--updates]` | 설치 및 설정 상태 진단 |
+| `hiddink-harness security [--verbose]` | 보안 감사 실행 |
 
-전역 플래그: `--auto-self-update`, `--skip-self-update`.
+전역 플래그: `--skip-version-check`, `--auto-self-update`, `--skip-self-update`.
 
 ---
 
@@ -79,24 +74,25 @@ CLI는 CWD 경로에서 결정적 프로젝트 ID를 도출하여 `.claude/`, `.
 
 ### CWD별 symlink 마운트
 
-어느 디렉토리에서든 `hiddink-harness`를 실행하면 CLI가 진입 시 전역 SSOT를 향하는 symlink를 자동으로 마운트하고 종료 시 자동으로 제거합니다. `init` 불필요.
+어느 디렉토리에서든 `hiddink-harness`를 실행하면 CLI가 진입 시 전역 SSOT를 향하는 symlink를 자동으로 마운트하고 종료 시 자동으로 제거합니다. 템플릿은 최초 실행 시 자동으로 시드됩니다.
 
 전역 상태 레이아웃:
 
 ```
 ~/.hiddink-harness/
 ├── projects/
-│   └── {projectId}/          # CWD별 결정론적 ID (SHA256 + basename)
+│   └── {projectId}/          # 예: my-app-8f9a2b3c4d5e
 │       ├── .claude/          # Claude Code 상태 SSOT
 │       ├── .agy/
 │       ├── .omx/
-│       └── .kimi/
-├── sessions/                 # 크로스 프로바이더 세션 인덱스
-├── state/                    # active-process.json 등
-└── memory/                   # 장기 메모리
+│       ├── .kimi/
+│       ├── sessions/         # 프로젝트별 세션 인덱스
+│       ├── memory/           # 프로젝트별 장기 메모리
+│       └── .seed-version     # 자동 시드 스탬프
+└── state/                    # 전역: active-process.json 등
 ```
 
-`projectId`는 `src/core/global-state.ts`의 `getProjectId`가 CWD 절대경로를 기반으로 결정론적으로 산출합니다 (`SHA256[:12] + basename`). 동일 디렉토리는 항상 동일한 SSOT 슬롯으로 연결됩니다.
+`projectId` 형식: `{디렉토리명}-{12자리-sha256-hex}` (예: `my-app-8f9a2b3c4d5e`). `src/core/global-state.ts`의 `getProjectId`가 CWD 절대경로를 기반으로 결정론적으로 산출합니다. 동일 디렉토리는 항상 동일한 SSOT 슬롯으로 연결됩니다.
 
 ### ConversationHub
 
@@ -124,10 +120,24 @@ hiddink-harness/
 │   ├── mcp/                # MCP 서버 진입점
 │   └── i18n/               # 로케일 (en, ko)
 ├── templates/
-│   ├── .claude/agents/     # 에이전트 정의 49개
-│   ├── .claude/skills/     # 스킬 디렉토리 121개
-│   ├── .claude/rules/      # 규칙 파일 23개
-│   └── guides/             # 가이드 토픽 57개
+│   ├── agents/             # 에이전트 정의 49개
+│   ├── skills/             # 스킬 디렉토리 121개
+│   ├── rules/              # 규칙 파일 23개
+│   ├── hooks/
+│   ├── contexts/
+│   ├── ontology/
+│   ├── guides/             # 가이드 토픽 57개
+│   ├── claude-specific/    # Claude Code 전용 에셋
+│   │   ├── output-styles/
+│   │   ├── profiles/
+│   │   ├── schemas/
+│   │   └── config/
+│   ├── install-hooks.sh
+│   ├── uninstall-hooks.sh
+│   ├── statusline.sh
+│   ├── manifest.json
+│   ├── deprecated-files.json
+│   └── index.yaml
 ├── packages/               # 워크스페이스 패키지 (memory-mcp-server, eval-core)
 └── tests/                  # Bun 테스트 스위트 (2175개 통과)
 ```
@@ -136,19 +146,20 @@ hiddink-harness/
 
 ## 런타임 레이아웃
 
-어느 디렉토리에서든 `hiddink-harness`를 실행하면 CLI가 CWD별 SSOT를 자동으로 생성하고 symlink를 마운트합니다. `init` 불필요.
+어느 디렉토리에서든 `hiddink-harness`를 실행하면 CLI가 CWD별 SSOT를 자동으로 생성하고 symlink를 마운트합니다. 템플릿은 최초 실행 시 자동으로 시드됩니다.
 
 ```
 ~/.hiddink-harness/
 ├── projects/
-│   └── {projectId}/      # CWD별 결정론적 ID (SHA256 + basename)
+│   └── {projectId}/      # 예: my-app-8f9a2b3c4d5e
 │       ├── .claude/      # Claude Code 상태 (SSOT)
 │       ├── .agy/
 │       ├── .omx/         # OpenAI Codex
-│       └── .kimi/
-├── sessions/             # 크로스 프로바이더 세션 인덱스
-├── state/                # active-process.json
-└── memory/               # 장기 메모리
+│       ├── .kimi/
+│       ├── sessions/     # 프로젝트별 세션 인덱스
+│       ├── memory/       # 프로젝트별 장기 메모리
+│       └── .seed-version # 자동 시드 스탬프
+└── state/                # 전역: active-process.json
 ```
 
 CLI는 진입 시 현재 디렉토리에 `.claude/`, `.agy/`, `.omx/`, `.kimi/` symlink를 SSOT를 향해 마운트하고 종료 시 제거합니다. projectId는 CWD 경로에서 결정론적으로 산출되므로 같은 디렉토리는 세션 간에도 동일한 SSOT를 재사용합니다.
@@ -167,5 +178,3 @@ CLI는 진입 시 현재 디렉토리에 `.claude/`, `.agy/`, `.omx/`, `.kimi/` 
 SPDX: `LicenseRef-Hiddink-NC-1.0`
 
 이 프로젝트는 비상업적 라이선스 하에 소스를 공개합니다. 개인 및 오픈소스 용도의 사용은 허용됩니다. 상업적 이용은 저자의 명시적인 서면 허가가 필요합니다. 전체 조건은 [LICENSE](LICENSE) 파일을 참조하세요.
-
-참고: `package.json`의 `"license": "MIT"` 표기는 레지스트리 호환성을 위한 것으로, 실제 적용되는 라이선스는 `LICENSE` 파일의 Hiddink Non-Commercial License입니다.

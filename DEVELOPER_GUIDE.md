@@ -84,11 +84,11 @@ bun run lint:fix
     1.  `stage-blocker.sh` 및 `content-hash-validator.sh` 등의 쉘 스크립트가 비동기/동기 도구 호출 시 안정적으로 에러를 반환하는지 테스트 케이스를 구축합니다.
     2.  컨텍스트 사용량을 능동적으로 조절하는 `context-budget-advisor.sh` (Ecomode)의 판단 임계값 설정을 다듬습니다.
 
-### Task 4: CLI 설정 마법사(hiddink-harness setup) 구현
+### Task 4: CLI 설정 마법사(hiddink-harness doctor --fix) 고도화
 *   **목적**: 사용자가 CLI 상에서 손쉽게 프로바이더와 다국어(English, Korean) 및 설치할 컴포넌트(에이전트, 스킬, 가이드 등)를 고를 수 있게 합니다.
 *   **작업 내용**:
     1.  `@inquirer/prompts` 또는 `@clack/prompts` 패키지를 활용하여 세련된 인터랙티브 CLI 질의 단계를 구현합니다.
-    2.  `hiddink-harness init` 실행 시 자동으로 로컬 환경을 스캔하고 최적의 설정을 추천해 주는 대화형 셋업 Flow를 작성합니다.
+    2.  `hiddink-harness doctor --fix` 실행 시 자동으로 로컬 환경을 스캔하고 최적의 설정을 추천해 주는 대화형 셋업 Flow를 작성합니다.
 
 ---
 
@@ -105,4 +105,4 @@ bun run lint:fix
 
 ---
 
-> 💡 **새로운 에이전트 또는 스킬을 추가하고자 한다면**, `templates/.claude/agents/` 또는 `templates/.claude/skills/`에 템플릿 마크다운 파일을 생성한 후 `bun run build`를 통해 검증 및 테스트를 시작할 수 있습니다.
+> 새로운 에이전트 또는 스킬을 추가하고자 한다면, `templates/agents/` 또는 `templates/skills/`에 템플릿 마크다운 파일을 생성한 후 `bun run build`를 통해 검증 및 테스트를 시작할 수 있습니다.
