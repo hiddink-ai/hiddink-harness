@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { getGlobalStateDir, getProjectId, getProjectStateDir } from '../../core/global-state.js';
+import { getProjectId, getProjectStateDir } from '../../core/global-state.js';
 import { ConversationHub } from '../../core/hub.js';
 import { ChatPanel } from './ChatPanel.js';
 
@@ -55,8 +55,8 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
   // 세션 데이터 수집 및 정합 (useCallback으로 메모이제이션)
   const syncSessions = useCallback(() => {
     try {
-      const globalDir = getGlobalStateDir();
-      const sessionsDir = join(globalDir, 'sessions');
+      const projectDir = getProjectStateDir(projectId);
+      const sessionsDir = join(projectDir, 'sessions');
       if (!existsSync(sessionsDir)) return;
 
       const files = readdirSync(sessionsDir).filter(
@@ -67,21 +67,18 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
       for (const file of files) {
         try {
           const content = JSON.parse(readFileSync(join(sessionsDir, file), 'utf-8'));
-          // 해당 프로젝트의 세션만 필터링
-          if (content.projectId === projectId) {
-            const msgs = content.messages || [];
-            const lastMsg = msgs[msgs.length - 1];
-            list.push({
-              sessionId: content.sessionId,
-              projectId: content.projectId,
-              projectPath: content.projectPath,
-              createdAt: content.createdAt,
-              updatedAt: content.updatedAt,
-              lastMessageSnippet: lastMsg
-                ? `${lastMsg.role}: ${lastMsg.content.slice(0, 35)}...`
-                : 'No messages',
-            });
-          }
+          const msgs = content.messages || [];
+          const lastMsg = msgs[msgs.length - 1];
+          list.push({
+            sessionId: content.sessionId,
+            projectId: content.projectId,
+            projectPath: content.projectPath,
+            createdAt: content.createdAt,
+            updatedAt: content.updatedAt,
+            lastMessageSnippet: lastMsg
+              ? `${lastMsg.role}: ${lastMsg.content.slice(0, 35)}...`
+              : 'No messages',
+          });
         } catch {
           // 파싱 에러 스킵
         }
@@ -131,8 +128,11 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
       .then((m) => hub.registerAdapter(new m.CodexAdapter()))
       .catch(() => {});
     // kimi-adapter는 아직 구현 중 — binary 부재 시 graceful degradation
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic import of not-yet-existing module
-    (import('../../core/providers/kimi-adapter.js') as Promise<any>)
+    (
+      import('../../core/providers/kimi-adapter.js') as Promise<{
+        KimiAdapter: new () => Parameters<typeof hub.registerAdapter>[0];
+      }>
+    )
       .then((m) => hub.registerAdapter(new m.KimiAdapter()))
       .catch(() => {});
     return () => {

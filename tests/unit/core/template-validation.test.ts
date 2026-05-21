@@ -307,7 +307,7 @@ describe('Template Validation', () => {
 
   describe('Skill frontmatter', () => {
     it('every SKILL.md should have valid YAML frontmatter', async () => {
-      const skillsDir = join(TEMPLATES_DIR, '.claude/skills');
+      const skillsDir = join(TEMPLATES_DIR, 'skills');
       const skillDirs = await readdir(skillsDir, { withFileTypes: true });
       const skillDirectories = skillDirs.filter((e) => e.isDirectory()).map((e) => e.name);
 
@@ -323,7 +323,7 @@ describe('Template Validation', () => {
     });
 
     it('skill name field should be non-empty string', async () => {
-      const skillsDir = join(TEMPLATES_DIR, '.claude/skills');
+      const skillsDir = join(TEMPLATES_DIR, 'skills');
       const skillDirs = await readdir(skillsDir, { withFileTypes: true });
       const skillDirectories = skillDirs.filter((e) => e.isDirectory()).map((e) => e.name);
 
@@ -346,7 +346,7 @@ describe('Template Validation', () => {
     });
 
     it('skill description field should be non-empty string', async () => {
-      const skillsDir = join(TEMPLATES_DIR, '.claude/skills');
+      const skillsDir = join(TEMPLATES_DIR, 'skills');
       const skillDirs = await readdir(skillsDir, { withFileTypes: true });
       const skillDirectories = skillDirs.filter((e) => e.isDirectory()).map((e) => e.name);
 
@@ -371,7 +371,7 @@ describe('Template Validation', () => {
 
   describe('Agent frontmatter', () => {
     it('every agent .md file should have valid YAML frontmatter', async () => {
-      const agentsDir = join(TEMPLATES_DIR, '.claude/agents');
+      const agentsDir = join(TEMPLATES_DIR, 'agents');
       const agentFiles = (await readdir(agentsDir, { withFileTypes: true }))
         .filter((e) => e.isFile() && e.name.endsWith('.md'))
         .map((e) => e.name);
@@ -389,7 +389,7 @@ describe('Template Validation', () => {
 
     it('agent model field should be a valid model value', async () => {
       const validModels = new Set(['sonnet', 'opus', 'haiku', 'inherit']);
-      const agentsDir = join(TEMPLATES_DIR, '.claude/agents');
+      const agentsDir = join(TEMPLATES_DIR, 'agents');
       const agentFiles = (await readdir(agentsDir, { withFileTypes: true }))
         .filter((e) => e.isFile() && e.name.endsWith('.md'))
         .map((e) => e.name);
@@ -415,7 +415,7 @@ describe('Template Validation', () => {
     });
 
     it('agent name field should match filename without extension', async () => {
-      const agentsDir = join(TEMPLATES_DIR, '.claude/agents');
+      const agentsDir = join(TEMPLATES_DIR, 'agents');
       const agentFiles = (await readdir(agentsDir, { withFileTypes: true }))
         .filter((e) => e.isFile() && e.name.endsWith('.md'))
         .map((e) => e.name);
@@ -453,7 +453,7 @@ describe('Template Validation', () => {
 
       const readmeAgentCount = parseInt(agentsHeaderMatch?.[1] ?? '0', 10);
 
-      const agentsDir = join(TEMPLATES_DIR, '.claude/agents');
+      const agentsDir = join(TEMPLATES_DIR, 'agents');
       const agentFiles = (await readdir(agentsDir, { withFileTypes: true })).filter(
         (e) => e.isFile() && e.name.endsWith('.md')
       );
@@ -471,7 +471,7 @@ describe('Template Validation', () => {
 
       const readmeSkillCount = parseInt(skillsHeaderMatch?.[1] ?? '0', 10);
 
-      const skillsDir = join(TEMPLATES_DIR, '.claude/skills');
+      const skillsDir = join(TEMPLATES_DIR, 'skills');
       const skillDirs = (await readdir(skillsDir, { withFileTypes: true })).filter((e) =>
         e.isDirectory()
       );
@@ -489,7 +489,7 @@ describe('Template Validation', () => {
 
       const readmeRulesCount = parseInt(rulesHeaderMatch?.[1] ?? '0', 10);
 
-      const rulesDir = join(TEMPLATES_DIR, '.claude/rules');
+      const rulesDir = join(TEMPLATES_DIR, 'rules');
       const rulesFiles = (await readdir(rulesDir, { withFileTypes: true })).filter(
         (e) => e.isFile() && e.name.endsWith('.md')
       );

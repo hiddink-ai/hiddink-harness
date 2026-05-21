@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const SCRIPTS_DIR = resolve(import.meta.dir, '../../../templates/.claude/hooks/scripts');
+const SCRIPTS_DIR = resolve(import.meta.dir, '../../../templates/hooks/scripts');
 const STUCK_DETECTOR_SCRIPT = resolve(SCRIPTS_DIR, 'stuck-detector.sh');
 
 // -------------------------------------------------------------------

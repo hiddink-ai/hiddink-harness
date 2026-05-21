@@ -5,8 +5,8 @@ import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const SCRIPTS_DIR = resolve(import.meta.dir, '../../../templates/.claude/hooks/scripts');
-const HOOKS_JSON_PATH = resolve(import.meta.dir, '../../../templates/.claude/hooks/hooks.json');
+const SCRIPTS_DIR = resolve(import.meta.dir, '../../../templates/hooks/scripts');
+const HOOKS_JSON_PATH = resolve(import.meta.dir, '../../../templates/hooks/hooks.json');
 
 const STAGE_BLOCKER_SCRIPT = join(SCRIPTS_DIR, 'stage-blocker.sh');
 const GIT_DELEGATION_GUARD_SCRIPT = join(SCRIPTS_DIR, 'git-delegation-guard.sh');

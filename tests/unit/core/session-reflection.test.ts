@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 // ── Canonical script path (tests always target templates/) ──
-const SCRIPTS_DIR = resolve(import.meta.dir, '../../../templates/.claude/hooks/scripts');
+const SCRIPTS_DIR = resolve(import.meta.dir, '../../../templates/hooks/scripts');
 const SCRIPT = join(SCRIPTS_DIR, 'session-reflection.sh');
 
 // ── Helpers ──
@@ -133,7 +133,7 @@ function testEnv(): Record<string, string> {
 // ════════════════════════════════════════════════════════════════
 
 describe('session-reflection.sh — file existence', () => {
-  it('exists at templates/.claude/hooks/scripts/session-reflection.sh', () => {
+  it('exists at templates/hooks/scripts/session-reflection.sh', () => {
     expect(existsSync(SCRIPT)).toBe(true);
   });
 

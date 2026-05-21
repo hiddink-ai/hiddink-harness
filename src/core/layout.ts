@@ -13,7 +13,11 @@ export type InstallComponent =
   | 'guides'
   | 'hooks'
   | 'contexts'
-  | 'ontology';
+  | 'ontology'
+  | 'output-styles'
+  | 'profiles'
+  | 'schemas'
+  | 'config';
 
 export interface ProviderLayout {
   rootDir: string;
@@ -137,4 +141,29 @@ export function getComponentPath(component: InstallComponent, providerName = 'cl
   }
 
   return `${layout.rootDir}/${component}`;
+}
+
+/**
+ * Source path within the templates/ directory for a component.
+ * Common components live at templates/<component>/.
+ * Claude-specific components live at templates/claude-specific/<component>/.
+ */
+export function getTemplateSourcePath(component: InstallComponent): string {
+  const claudeSpecific = new Set<InstallComponent>([
+    'output-styles',
+    'profiles',
+    'schemas',
+    'config',
+  ]);
+
+  if (component === 'entry-md') {
+    return 'entry-md';
+  }
+  if (component === 'guides') {
+    return 'guides';
+  }
+  if (claudeSpecific.has(component)) {
+    return `claude-specific/${component}`;
+  }
+  return component;
 }

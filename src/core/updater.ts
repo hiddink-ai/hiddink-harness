@@ -21,7 +21,7 @@ import { installCodex, isCodexInstalled } from './codex-installer.js';
 import { loadConfig, type OmccConfig, saveConfig } from './config.js';
 import { mergeEntryDoc, wrapInManagedMarkers } from './entry-merger.js';
 import { isProtectedFile } from './file-preservation.js';
-import { getProviderLayout } from './layout.js';
+import { getProviderLayout, getTemplateSourcePath, type InstallComponent } from './layout.js';
 import {
   computeFileHash,
   generateAndWriteLockfileForDir,
@@ -131,17 +131,6 @@ export interface AgentVersion {
   lastUpdated: string;
   /** Whether it has local modifications */
   hasLocalModifications: boolean;
-}
-
-/**
- * Component version tracking (reserved for future use)
- */
-interface _ComponentVersions {
-  [component: string]: {
-    version: string;
-    lastUpdated: string;
-    checksum?: string;
-  };
 }
 
 /**
@@ -395,7 +384,8 @@ async function updateEntryDoc(
 ): Promise<void> {
   const layout = getProviderLayout();
   const entryPath = join(targetDir, layout.entryFile);
-  const templateName = getEntryTemplateName(config.language);
+  const lang = (config.language === 'ko' ? 'ko' : 'en') as 'en' | 'ko';
+  const templateName = getEntryTemplateName(lang);
   const templatePath = resolveTemplatePath(templateName);
 
   if (!(await fileExists(templatePath))) {
@@ -972,7 +962,7 @@ async function updateComponent(
 ): Promise<string[]> {
   const preservedFiles: string[] = [];
   const componentPath = getComponentPath(component);
-  const srcPath = resolveTemplatePath(componentPath);
+  const srcPath = resolveTemplatePath(getComponentTemplatePath(component));
   const destPath = join(targetDir, componentPath);
 
   // Use provided config to check for managed:false components
@@ -1063,13 +1053,13 @@ async function updateComponent(
 }
 
 /**
- * Root-level files in .claude/ that should be synced during update
- * These are files that exist directly under templates/.claude/ (not in subdirectories)
+ * Root-level files that should be synced during update.
+ * These files were previously under templates/.claude/ and are now at templates/ root (flattened).
  */
 const ROOT_LEVEL_FILES = ['statusline.sh', 'install-hooks.sh', 'uninstall-hooks.sh'];
 
 /**
- * Sync root-level files from templates/.claude/ to target .claude/ directory
+ * Sync root-level files from templates/ root to target .claude/ directory.
  * These files don't belong to any component subdirectory.
  */
 async function syncRootLevelFiles(targetDir: string, options: UpdateOptions): Promise<string[]> {
@@ -1082,7 +1072,8 @@ async function syncRootLevelFiles(targetDir: string, options: UpdateOptions): Pr
   const synced: string[] = [];
 
   for (const fileName of ROOT_LEVEL_FILES) {
-    const srcPath = resolveTemplatePath(join(layout.rootDir, fileName));
+    // Files are now at templates/<fileName>, not templates/.claude/<fileName>
+    const srcPath = resolveTemplatePath(fileName);
 
     if (!(await fileExists(srcPath))) {
       continue;
@@ -1260,7 +1251,7 @@ async function applyNamespaceSync(
   if (!lockfile) return [];
 
   const componentPath = getComponentPath(component);
-  const srcPath = resolveTemplatePath(componentPath);
+  const srcPath = resolveTemplatePath(getComponentTemplatePath(component));
   const destPath = join(targetDir, componentPath);
 
   const fs = await import('node:fs/promises');
@@ -1311,12 +1302,24 @@ async function applyNamespaceSync(
 /**
  * Get the path for a component
  */
+/**
+ * Returns the deploy target path for a component (relative to project root).
+ * e.g. 'rules' → '.claude/rules', 'guides' → 'guides'
+ */
 function getComponentPath(component: UpdateComponent): string {
   const layout = getProviderLayout();
   if (component === 'guides') {
     return 'guides';
   }
   return `${layout.rootDir}/${component}`;
+}
+
+/**
+ * Returns the source path within templates/ for a component (post-flatten).
+ * e.g. 'rules' → 'rules', 'guides' → 'guides'
+ */
+function getComponentTemplatePath(component: UpdateComponent): string {
+  return getTemplateSourcePath(component as InstallComponent);
 }
 
 /**

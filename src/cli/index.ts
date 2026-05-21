@@ -4,39 +4,22 @@
  * Main CLI application using Commander.js
  */
 
-import { createRequire } from 'node:module';
 import { Command } from 'commander';
+import packageJson from '../../package.json' with { type: 'json' };
 import {
   ensureGlobalLayout,
   getProjectId,
   mountSymlinks,
   registerCleanupHandlers,
+  seedTemplatesIfNeeded,
 } from '../core/global-state.js';
 import { formatPreflightWarnings, runPreflightCheck } from '../core/preflight.js';
-import { unregisterProject } from '../core/registry.js';
-import {
-  maybeHandleSelfUpdateForCommand,
-  maybeHandleSelfUpdateForInit,
-} from '../core/self-update.js';
+import { maybeHandleSelfUpdateForCommand } from '../core/self-update.js';
 import { detectLanguage, i18n, initI18n } from '../i18n/index.js';
 import { doctorCommand } from './doctor.js';
-import { initCommand } from './init.js';
 import { listCommand } from './list.js';
-import { projectsCommand } from './projects.js';
 import { securityCommand } from './security.js';
-import { serveCommand, serveStopCommand } from './serve-commands.js';
 import { syncCommand } from './sync.js';
-import { updateCommand } from './update.js';
-import {
-  webOpenCommand,
-  webStartCommand,
-  webStatusCommand,
-  webStopCommand,
-} from './web-commands.js';
-
-// Read version from package.json
-const require = createRequire(import.meta.url);
-const packageJson = require('../../package.json');
 
 /**
  * Creates and configures the CLI program
@@ -60,6 +43,10 @@ export function createProgram(): Command {
 
       if (!isTest) {
         ensureGlobalLayout(projectId);
+        const seed = seedTemplatesIfNeeded(projectId);
+        if (seed.seeded) {
+          process.stderr.write(`✓ Templates ${seed.reason}\n`);
+        }
         mountSymlinks(projectId, cwd);
         registerCleanupHandlers(projectId, cwd);
       }
@@ -69,43 +56,6 @@ export function createProgram(): Command {
       const { HiddinkTuiDashboard } = await import('./ui/Dashboard.js');
 
       render(React.createElement(HiddinkTuiDashboard, { cwd }));
-    });
-
-  // hiddink-harness init [--lang en|ko] [--domain <domain>] [--yes] [--force]
-  program
-    .command('init')
-    .description(i18n.t('cli.init.description'))
-    .option('-l, --lang <language>', i18n.t('cli.init.langOption'))
-    .option(
-      '--domain <domain>',
-      'Install only agents/skills for specific domain (backend, frontend, data-engineering, devops)'
-    )
-    .option('--yes', 'Skip interactive wizard, use defaults')
-    .option('--force', 'Overwrite existing files')
-    .option('--from-snapshot <path>', 'Install from a pre-configured team snapshot directory')
-    .action(async (options) => {
-      await initCommand(options);
-    });
-
-  // hiddink-harness update
-  program
-    .command('update')
-    .description(i18n.t('cli.update.description'))
-    .option('--dry-run', i18n.t('cli.update.dryRunOption'))
-    .option('--force', i18n.t('cli.update.forceOption'))
-    .option('--force-overwrite-all', i18n.t('cli.update.forceOverwriteAllOption'))
-    .option('--hard', i18n.t('cli.update.hardOption'))
-    .option('--backup', i18n.t('cli.update.backupOption'))
-    .option('--agents', i18n.t('cli.update.agentsOption'))
-    .option('--skills', i18n.t('cli.update.skillsOption'))
-    .option('--rules', i18n.t('cli.update.rulesOption'))
-    .option('--guides', i18n.t('cli.update.guidesOption'))
-    .option('--hooks', i18n.t('cli.update.hooksOption'))
-    .option('--contexts', i18n.t('cli.update.contextsOption'))
-    .option('--all', i18n.t('cli.update.allOption'))
-    .option('--skip-self', 'Skip self-update of hiddink-harness package')
-    .action(async (options) => {
-      await updateCommand(options);
     });
 
   // hiddink-harness list [type] [--format table|json|simple]
@@ -145,124 +95,6 @@ export function createProgram(): Command {
       process.exitCode = result.success ? 0 : 1;
     });
 
-  // hiddink-harness web — subcommand group for Web UI management
-  const web = program.command('web').description(i18n.t('cli.web.description'));
-
-  // hiddink-harness web start [--port 4321] [--foreground]
-  web
-    .command('start')
-    .description(i18n.t('cli.web.start.description'))
-    .option('-p, --port <port>', i18n.t('cli.web.start.portOption'), '4321')
-    .option('--foreground', i18n.t('cli.web.start.foregroundOption'))
-    .action(async (options) => {
-      await webStartCommand(options);
-    });
-
-  // hiddink-harness web stop
-  web
-    .command('stop')
-    .description(i18n.t('cli.web.stop.description'))
-    .action(async () => {
-      await webStopCommand();
-    });
-
-  // hiddink-harness web status
-  web
-    .command('status')
-    .description(i18n.t('cli.web.status.description'))
-    .action(async () => {
-      await webStatusCommand();
-    });
-
-  // hiddink-harness web open [--port 4321]
-  web
-    .command('open')
-    .description(i18n.t('cli.web.open.description'))
-    .option('-p, --port <port>', i18n.t('cli.web.open.portOption'), '4321')
-    .action(async (options) => {
-      await webOpenCommand(options);
-    });
-
-  // Default action for `hiddink-harness web` (no subcommand): show status
-  web.action(async () => {
-    await webStatusCommand();
-  });
-
-  // hiddink-harness serve — deprecated alias for `hiddink-harness web start`
-  program
-    .command('serve')
-    .description('(Deprecated) Start the Web UI server — use `hiddink-harness web start` instead')
-    .option('-p, --port <port>', i18n.t('cli.web.start.portOption'), '4321')
-    .option('--foreground', i18n.t('cli.web.start.foregroundOption'))
-    .action(async (options) => {
-      console.warn(i18n.t('cli.web.deprecated.serve'));
-      await serveCommand(options);
-    });
-
-  // hiddink-harness serve-stop — deprecated alias for `hiddink-harness web stop`
-  program
-    .command('serve-stop')
-    .description('(Deprecated) Stop the Web UI server — use `hiddink-harness web stop` instead')
-    .action(async () => {
-      console.warn(i18n.t('cli.web.deprecated.serveStop'));
-      await serveStopCommand();
-    });
-
-  // hiddink-harness projects [--format table|json|simple] [--path <dir>] [--migrate] [--clean]
-  program
-    .command('projects')
-    .description('List all projects on this machine where hiddink-harness is installed')
-    .option('-f, --format <format>', 'Output format: table, json, or simple', 'table')
-    .option(
-      '--path <dir>',
-      'Additional search directory (can be specified multiple times)',
-      (val: string, prev: string[]) => [...prev, val],
-      [] as string[]
-    )
-    .option(
-      '--migrate',
-      'Scan for existing projects with lock files and import them into the registry'
-    )
-    .option('--clean', 'Remove registry entries whose project paths no longer exist on disk')
-    .action(async (options) => {
-      await projectsCommand({
-        format: options.format,
-        paths: options.path,
-        migrate: options.migrate,
-        clean: options.clean,
-      });
-    });
-
-  // hiddink-harness unregister [path]
-  program
-    .command('unregister [path]')
-    .description('Remove a project from the local registry')
-    .action(async (projectPath?: string) => {
-      const targetPath = projectPath ?? process.cwd();
-      try {
-        await unregisterProject(targetPath);
-        console.log(`  프로젝트가 레지스트리에서 제거되었습니다: ${targetPath}`);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`  레지스트리 제거 실패: ${msg}`);
-        process.exitCode = 1;
-      }
-    });
-
-  // hiddink-harness mcp-serve
-  program
-    .command('mcp-serve')
-    .description('Start the Stdio based lightweight MCP server for memory management')
-    .action(async () => {
-      try {
-        const { startMcpServer } = await import('../mcp/server.js');
-        await startMcpServer();
-      } catch (error) {
-        console.error('Failed to start MCP server:', error);
-        process.exit(1);
-      }
-    });
-
   // Pre-flight hook: run before any command
   program.hook('preAction', async (thisCommand, actionCommand) => {
     const cwd = process.cwd();
@@ -273,6 +105,10 @@ export function createProgram(): Command {
 
     if (!isTest) {
       ensureGlobalLayout(projectId);
+      const seed = seedTemplatesIfNeeded(projectId);
+      if (seed.seeded) {
+        process.stderr.write(`✓ Templates ${seed.reason}\n`);
+      }
       mountSymlinks(projectId, cwd);
       registerCleanupHandlers(projectId, cwd);
     }
@@ -285,53 +121,37 @@ export function createProgram(): Command {
     const skipCheck = opts.skipVersionCheck || false;
 
     const cmdName = actionCommand.name();
-    const parentName = (actionCommand.parent as Command | undefined)?.name();
 
-    // Skip pre-flight for serve/serve-stop/web subcommands (fast server ops)
-    const isServeCmd = cmdName === 'serve' || cmdName === 'serve-stop';
-    const isWebCmd = cmdName === 'web' || parentName === 'web';
-    if (isServeCmd || isWebCmd) {
-      return;
+    // All commands: non-blocking self-update check
+    const autoApply =
+      opts.autoSelfUpdate === true || process.env.HIDDINK_HARNESS_AUTO_SELF_UPDATE === '1';
+    const skipSelfUpdate = opts.skipSelfUpdate === true;
+
+    // Determine whether we are in TUI mode (no-arg default action)
+    // The default action is registered directly on `program`, so its name() is
+    // the program name ("hiddink-harness") rather than a subcommand name.
+    const isTuiMode = cmdName === 'hiddink-harness' || cmdName === program.name();
+
+    const selfUpdateResult = await maybeHandleSelfUpdateForCommand({
+      currentVersion: packageJson.version,
+      skip: skipSelfUpdate,
+      autoApply,
+      mode: isTuiMode ? 'tui' : 'subcommand',
+    });
+
+    if (selfUpdateResult.applied && selfUpdateResult.latestVersion) {
+      // Newly installed version is in a different binary — must re-exec
+      process.stderr.write(
+        `✓ Upgraded hiddink-harness to ${selfUpdateResult.latestVersion}, please re-run the command.\n`
+      );
+      process.exit(0);
+    } else if (selfUpdateResult.updateAvailable && selfUpdateResult.latestVersion) {
+      // Print a one-line notice to stderr so it does not pollute stdout
+      process.stderr.write(
+        `⚠ hiddink-harness ${selfUpdateResult.latestVersion} available (current: ${packageJson.version}). Run with --auto-self-update or \`hiddink-harness sync\`\n`
+      );
     }
-
-    if (cmdName === 'init') {
-      // init uses the interactive prompt flow — keep existing behavior
-      await maybeHandleSelfUpdateForInit({
-        currentVersion: packageJson.version,
-        skip: skipCheck,
-      });
-    } else {
-      // All other commands: non-blocking self-update check
-      const autoApply =
-        opts.autoSelfUpdate === true || process.env.HIDDINK_HARNESS_AUTO_SELF_UPDATE === '1';
-      const skipSelfUpdate = opts.skipSelfUpdate === true;
-
-      // Determine whether we are in TUI mode (no-arg default action)
-      // The default action is registered directly on `program`, so its name() is
-      // the program name ("hiddink-harness") rather than a subcommand name.
-      const isTuiMode = cmdName === 'hiddink-harness' || cmdName === program.name();
-
-      const selfUpdateResult = await maybeHandleSelfUpdateForCommand({
-        currentVersion: packageJson.version,
-        skip: skipSelfUpdate,
-        autoApply,
-        mode: isTuiMode ? 'tui' : 'subcommand',
-      });
-
-      if (selfUpdateResult.applied && selfUpdateResult.latestVersion) {
-        // Newly installed version is in a different binary — must re-exec
-        process.stderr.write(
-          `✓ Upgraded hiddink-harness to ${selfUpdateResult.latestVersion}, please re-run the command.\n`
-        );
-        process.exit(0);
-      } else if (selfUpdateResult.updateAvailable && selfUpdateResult.latestVersion) {
-        // Print a one-line notice to stderr so it does not pollute stdout
-        process.stderr.write(
-          `⚠ hiddink-harness ${selfUpdateResult.latestVersion} available (current: ${packageJson.version}). Run with --auto-self-update or \`hiddink-harness update\`\n`
-        );
-      }
-      // error / skipped / no update → silent
-    }
+    // error / skipped / no update → silent
 
     const result = await runPreflightCheck({ skip: skipCheck });
 

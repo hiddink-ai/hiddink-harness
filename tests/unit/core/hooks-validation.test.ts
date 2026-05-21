@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const HOOKS_FILE = resolve(import.meta.dir, '../../../templates/.claude/hooks/hooks.json');
+const HOOKS_FILE = resolve(import.meta.dir, '../../../templates/hooks/hooks.json');
 
 interface CommandHook {
   type: 'command';
@@ -407,7 +407,7 @@ describe('Hooks Validation', () => {
       // Read the script file to verify it references /tmp/.claude-dev-stage
       const scriptPath = resolve(
         import.meta.dir,
-        '../../../templates/.claude/hooks/scripts/stage-blocker.sh'
+        '../../../templates/hooks/scripts/stage-blocker.sh'
       );
       const scriptContent = await readFile(scriptPath, 'utf-8');
       expect(scriptContent).toContain('/tmp/.claude-dev-stage');
@@ -417,7 +417,7 @@ describe('Hooks Validation', () => {
       // Read the stage-blocker script to verify stage names
       const scriptPath = resolve(
         import.meta.dir,
-        '../../../templates/.claude/hooks/scripts/stage-blocker.sh'
+        '../../../templates/hooks/scripts/stage-blocker.sh'
       );
       const scriptContent = await readFile(scriptPath, 'utf-8');
 
@@ -457,7 +457,7 @@ describe('Hooks Validation', () => {
     it('should have the stop-console-audit script file', async () => {
       const scriptPath = resolve(
         import.meta.dir,
-        '../../../templates/.claude/hooks/scripts/stop-console-audit.sh'
+        '../../../templates/hooks/scripts/stop-console-audit.sh'
       );
       const scriptContent = await readFile(scriptPath, 'utf-8');
       expect(scriptContent).toContain('console');
@@ -467,7 +467,7 @@ describe('Hooks Validation', () => {
     it('should have session diagnostics in stop script', async () => {
       const scriptPath = resolve(
         import.meta.dir,
-        '../../../templates/.claude/hooks/scripts/stop-console-audit.sh'
+        '../../../templates/hooks/scripts/stop-console-audit.sh'
       );
       const scriptContent = await readFile(scriptPath, 'utf-8');
       expect(scriptContent).toContain('Session safe to terminate');

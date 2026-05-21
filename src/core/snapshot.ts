@@ -7,10 +7,10 @@ import { existsSync } from 'node:fs';
 import { copyFile, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 import packageJson from '../../package.json';
-import { readLockFile, writeLockFile } from '../cli/projects.js';
 import { i18n } from '../i18n/index.js';
 import { fileExists } from '../utils/fs.js';
 import { getProviderLayout } from './layout.js';
+import { generateAndWriteLockfileForDir } from './lockfile.js';
 import { registerProject } from './registry.js';
 
 /**
@@ -119,8 +119,7 @@ export async function installFromSnapshot(
 
     // Update lock file
     try {
-      const existing = await readLockFile(targetDir);
-      await writeLockFile(targetDir, packageJson.version, existing);
+      await generateAndWriteLockfileForDir(targetDir);
     } catch {
       // Non-blocking
     }

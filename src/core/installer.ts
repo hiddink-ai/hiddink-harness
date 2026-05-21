@@ -39,6 +39,7 @@ import {
   getComponentPath,
   getEntryTemplateName,
   getProviderLayout,
+  getTemplateSourcePath,
   type InstallComponent,
 } from './layout.js';
 import { generateAndWriteLockfileForDir } from './lockfile.js';
@@ -226,7 +227,8 @@ async function installStatusline(
   if (provider !== 'claude') return; // Only Claude Code supports shell statusline script
 
   const layout = getProviderLayout(provider);
-  const srcPath = resolveTemplatePath(join(layout.rootDir, 'statusline.sh'));
+  // statusline.sh now lives at templates/statusline.sh (flattened from templates/.claude/)
+  const srcPath = resolveTemplatePath('statusline.sh');
   const destPath = join(targetDir, layout.rootDir, 'statusline.sh');
 
   if (!(await fileExists(srcPath))) {
@@ -316,7 +318,7 @@ async function installAgyPluginManifest(targetDir: string, provider: string): Pr
   const manifest = {
     id: 'hiddink-harness-harness',
     name: 'Hiddink Harness for Antigravity',
-    version: '0.0.1',
+    version: '0.0.2',
     description:
       'Universal Agent Harness for managing custom agents, skills, and rules on agy runtime.',
     entry: 'AGY.md',
@@ -334,13 +336,7 @@ async function installAgyPluginManifest(targetDir: string, provider: string): Pr
       ],
       rules: '.agy/rules/',
       hooks: '.agy/hooks/',
-      mcpServers: [
-        {
-          name: 'hiddink-mcp',
-          command: 'bun',
-          args: ['run', 'hiddink-harness', 'mcp-serve'],
-        },
-      ],
+      mcpServers: [],
     },
   };
 
@@ -696,9 +692,9 @@ async function installComponent(
     return false;
   }
 
-  // SSOT: Templates are sourced from a unified Claude template root, and transpiled to provider dirs
-  // Guides are shared, but subdirs (agents, skills, rules) are copied to provider targets
-  const unifiedSourcePath = getComponentPath(component, 'claude');
+  // SSOT: Templates are sourced from the flattened templates/ root, not the provider-specific .claude/ path.
+  // Common components live at templates/<component>/, claude-specific at templates/claude-specific/<component>/.
+  const unifiedSourcePath = getTemplateSourcePath(component);
   const srcPath = resolveTemplatePath(unifiedSourcePath);
 
   if (!(await fileExists(srcPath))) {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -10,7 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { debug, warn } from '../utils/logger.js';
 
 /**
@@ -44,16 +46,18 @@ export function getProjectStateDir(projectId: string): string {
 
 /**
  * ~/.hiddink-harness의 전역 레이아웃 및 특정 프로젝트 격리 레이아웃을 확실히 생성합니다.
+ * sessions/, memory/는 projects/{id}/ 하위에 위치하며 전역 레벨에는 생성하지 않습니다.
+ * state/는 active-process tracking 용도로 전역 레벨에 유지합니다.
  */
 export function ensureGlobalLayout(projectId: string): void {
   const globalDir = getGlobalStateDir();
   const subDirs = [
     globalDir,
-    join(globalDir, 'sessions'),
     join(globalDir, 'state'),
-    join(globalDir, 'memory'),
     join(globalDir, 'projects'),
     join(globalDir, 'projects', projectId),
+    join(globalDir, 'projects', projectId, 'sessions'),
+    join(globalDir, 'projects', projectId, 'memory'),
     join(globalDir, 'projects', projectId, '.claude'),
     join(globalDir, 'projects', projectId, '.agy'),
     join(globalDir, 'projects', projectId, '.omx'),
@@ -67,8 +71,8 @@ export function ensureGlobalLayout(projectId: string): void {
     }
   }
 
-  // 통합 세션 인덱스 파일 보장
-  const sessionIndex = join(globalDir, 'sessions', 'index.json');
+  // 세션 인덱스 파일은 projects/{id}/sessions/ 하위에 위치
+  const sessionIndex = join(globalDir, 'projects', projectId, 'sessions', 'index.json');
   if (!existsSync(sessionIndex)) {
     writeFileSync(sessionIndex, JSON.stringify([], null, 2), 'utf-8');
   }
@@ -237,4 +241,95 @@ function deregisterActiveProcess(projectId: string): void {
       // 무시
     }
   }
+}
+
+/**
+ * 패키지 번들에 포함된 templates/ 디렉터리의 절대 경로를 반환합니다.
+ * import.meta.url 기반으로 해석되어 src 기준과 dist 기준 모두에서 동작합니다.
+ */
+export function getPackageTemplatesDir(): string {
+  // src/core/global-state.ts → dist/core/global-state.js 기준
+  // templates는 패키지 루트에 위치: dist/core → ../../templates
+  const here = dirname(fileURLToPath(import.meta.url));
+  return join(here, '..', '..', 'templates');
+}
+
+export interface SeedResult {
+  seeded: boolean;
+  reason: string;
+}
+
+/**
+ * 패키지 templates/ 트리를 프로젝트 SSOT에 시드합니다.
+ * SSOT가 비어 있거나 패키지 버전이 다를 경우에만 복사합니다.
+ * 멱등성 보장 — CLI 진입 시마다 안전하게 호출 가능합니다.
+ */
+export function seedTemplatesIfNeeded(projectId: string): SeedResult {
+  const projectDir = getProjectStateDir(projectId);
+  const stampPath = join(projectDir, '.seed-version');
+  const templatesDir = getPackageTemplatesDir();
+
+  if (!existsSync(templatesDir)) {
+    return { seeded: false, reason: 'package templates dir missing' };
+  }
+
+  // 패키지 버전 읽기 (best-effort)
+  let packageVersion = '0.0.0';
+  try {
+    const pkgPath = join(templatesDir, '..', 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string };
+      packageVersion = pkg.version ?? '0.0.0';
+    }
+  } catch {
+    // 무시
+  }
+
+  const currentStamp = existsSync(stampPath) ? readFileSync(stampPath, 'utf-8').trim() : '';
+  if (currentStamp === packageVersion) {
+    return { seeded: false, reason: 'up to date' };
+  }
+
+  // 공통 컴포넌트 목록
+  const commonComponents = ['agents', 'skills', 'rules', 'hooks', 'contexts', 'ontology'] as const;
+  // Claude 전용 컴포넌트 목록
+  const claudeOnlyComponents = ['output-styles', 'profiles', 'schemas', 'config'] as const;
+
+  const providers: Array<{ root: string; includeClaudeSpecific: boolean }> = [
+    { root: '.claude', includeClaudeSpecific: true },
+    { root: '.agy', includeClaudeSpecific: false },
+    { root: '.omx', includeClaudeSpecific: false },
+    { root: '.kimi', includeClaudeSpecific: false },
+  ];
+
+  for (const provider of providers) {
+    const providerDir = join(projectDir, provider.root);
+
+    for (const comp of commonComponents) {
+      const src = join(templatesDir, comp);
+      const dest = join(providerDir, comp);
+      if (existsSync(src)) {
+        cpSync(src, dest, { recursive: true });
+      }
+    }
+
+    if (provider.includeClaudeSpecific) {
+      for (const comp of claudeOnlyComponents) {
+        const src = join(templatesDir, 'claude-specific', comp);
+        const dest = join(providerDir, comp);
+        if (existsSync(src)) {
+          cpSync(src, dest, { recursive: true });
+        }
+      }
+    }
+  }
+
+  // guides는 프로젝트 루트에 (provider-neutral)
+  const guidesSrc = join(templatesDir, 'guides');
+  if (existsSync(guidesSrc)) {
+    cpSync(guidesSrc, join(projectDir, 'guides'), { recursive: true });
+  }
+
+  writeFileSync(stampPath, packageVersion, 'utf-8');
+  return { seeded: true, reason: `seeded version ${packageVersion}` };
 }
