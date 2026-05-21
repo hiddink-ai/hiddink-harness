@@ -9,7 +9,12 @@
   },
   {
     "description": "Tool call — normalised to NormalizedMessage{role:'tool', content:[{type:'tool_use'}]}",
-    "event": { "type": "tool_call", "id": "kimi_tool_01", "name": "bash", "input": { "command": "ls" } }
+    "event": {
+      "type": "tool_call",
+      "id": "kimi_tool_01",
+      "name": "bash",
+      "input": { "command": "ls" }
+    }
   },
   {
     "description": "Done marker — discarded by KimiAdapter",

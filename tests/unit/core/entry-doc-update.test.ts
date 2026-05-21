@@ -20,7 +20,7 @@ describe('updateEntryDoc via update()', () => {
 
   async function createConfig(overrides?: Record<string, unknown>): Promise<void> {
     const config = getDefaultConfig();
-    config.version = '0.1.0';
+    config.version = '0.0.0';
     config.installedAt = '2025-01-01T00:00:00Z';
     if (overrides) {
       Object.assign(config, overrides);
@@ -160,7 +160,7 @@ describe('updateEntryDoc via update()', () => {
 
   // Test 5: dry-run must not update config version
   it('should NOT update config during dry-run', async () => {
-    await createConfig({ version: '0.1.0' });
+    await createConfig({ version: '0.0.0' });
     const layout = getProviderLayout();
     await mkdir(join(tempDir, layout.rootDir), { recursive: true });
 
@@ -181,7 +181,7 @@ describe('updateEntryDoc via update()', () => {
     const contentAfter = await readFile(configPath, 'utf-8');
     const configAfter = JSON.parse(contentAfter);
     expect(configAfter.version).toBe(configBefore.version);
-    expect(configAfter.version).toBe('0.1.0');
+    expect(configAfter.version).toBe('0.0.0');
   });
 
   // Test 6: updateEntryDoc not called when specific components requested

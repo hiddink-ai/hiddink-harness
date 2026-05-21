@@ -1,7 +1,12 @@
 [
   {
     "description": "Session init event — resolves session ID in StreamJsonAdapterBase.spawn()",
-    "event": { "type": "system", "subtype": "init", "session_id": "claude-int-session-001", "version": "2.0" }
+    "event": {
+      "type": "system",
+      "subtype": "init",
+      "session_id": "claude-int-session-001",
+      "version": "2.0"
+    }
   },
   {
     "description": "Streaming text delta — normalised to NormalizedMessage{role:'assistant', content:[{type:'text'}]}",
@@ -21,7 +26,12 @@
       "event": {
         "type": "content_block_start",
         "index": 1,
-        "content_block": { "type": "tool_use", "id": "tool_abc", "name": "Read", "input": { "path": "/tmp/x" } }
+        "content_block": {
+          "type": "tool_use",
+          "id": "tool_abc",
+          "name": "Read",
+          "input": { "path": "/tmp/x" }
+        }
       }
     }
   },

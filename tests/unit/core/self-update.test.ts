@@ -5,7 +5,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import * as childProcess from 'node:child_process';
 
-
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -710,9 +709,7 @@ describe('self-update module', () => {
     it('should log messages and update globally when not silent', () => {
       const logSpy = spyOn(console, 'log').mockImplementation(() => {});
       const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-      const execSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      const execSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
 
       try {
         const options: ExecuteSelfUpdateOptions = {

@@ -56,7 +56,7 @@ describe('updater fallback paths', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  async function createConfig(version = '0.1.0', componentVersions?: Record<string, string>) {
+  async function createConfig(version = '0.0.0', componentVersions?: Record<string, string>) {
     const config = getDefaultConfig();
     config.version = version;
     config.installedAt = '2025-01-01T00:00:00Z';
@@ -73,7 +73,7 @@ describe('updater fallback paths', () => {
       const manifestPath = resolveTemplatePath(layout.manifestFile);
       overrideNonExistentPaths.add(manifestPath);
 
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const result = await checkForUpdates(tempDir);
 
@@ -108,7 +108,7 @@ describe('updater fallback paths', () => {
 
   describe('updateEntryDoc() template not found (lines 364-365)', () => {
     it('should warn and return early when entry template does not exist', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -141,7 +141,7 @@ describe('updater fallback paths', () => {
     });
 
     it('should return empty array when deprecated-files.json does not exist', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Make deprecated-files.json appear non-existent
       const manifestPath = resolveTemplatePath('deprecated-files.json');
@@ -157,7 +157,7 @@ describe('updater fallback paths', () => {
     });
 
     it('should return empty array when deprecated-files.json has empty files array', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Mock readJsonFile to return empty files manifest
       readJsonFileSpy = spyOn(fsUtils, 'readJsonFile').mockImplementation(
@@ -178,7 +178,7 @@ describe('updater fallback paths', () => {
     });
 
     it('should skip files with invalid paths in deprecated-files.json', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Mock readJsonFile to return manifest with invalid path
       readJsonFileSpy = spyOn(fsUtils, 'readJsonFile').mockImplementation(

@@ -85,10 +85,23 @@ describe('E2E: hiddink-harness list', () => {
   }
 
   /**
-   * Helper to initialize a project first
+   * Helper to initialize a project by creating the minimal directory structure.
+   * Note: The `init` command was removed in Phase 1a. This helper replaces it
+   * by directly creating the expected project structure.
    */
   async function initProject(): Promise<void> {
-    await runCli('init');
+    await writeFile(join(tempDir, 'CLAUDE.md'), '# Test Project\n');
+    await mkdir(join(tempDir, '.claude', 'rules'), { recursive: true });
+    await mkdir(join(tempDir, '.claude', 'agents'), { recursive: true });
+    await mkdir(join(tempDir, '.claude', 'skills'), { recursive: true });
+    await writeFile(
+      join(tempDir, '.claude', 'rules', 'MUST-test.md'),
+      '# Test Rule\n\n> **Priority**: MUST\n'
+    );
+    await writeFile(
+      join(tempDir, '.claude', 'agents', 'lang-test-agent.md'),
+      '---\nname: lang-test-agent\ndescription: Test agent\nmodel: sonnet\ntools: [Read]\n---\n\n# Test Agent\n'
+    );
   }
 
   /**
@@ -398,10 +411,7 @@ Rule content here.
       const jsonOutput = lines.slice(jsonStartIndex).join('\n');
 
       // Should parse as valid JSON
-      let parsed: unknown[];
-      expect(() => {
-        parsed = JSON.parse(jsonOutput);
-      }).not.toThrow();
+      const parsed: unknown[] = JSON.parse(jsonOutput);
 
       // Should be an array
       expect(Array.isArray(parsed)).toBe(true);

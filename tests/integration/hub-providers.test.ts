@@ -52,11 +52,7 @@ function makeMsg(
  * Builds a mock ChatSession that yields a fixed list of messages.
  * `close` is a mock function so call counts can be asserted in tests.
  */
-function makeSession(
-  id: string,
-  provider: ProviderId,
-  messages: NormalizedMessage[]
-): ChatSession {
+function makeSession(id: string, provider: ProviderId, messages: NormalizedMessage[]): ChatSession {
   return {
     id,
     provider,
@@ -317,7 +313,9 @@ describe('[5] Hub.sendTo("codex") — per-turn-resume resumeSessionId chain', ()
   it('first call spawns with no resumeSessionId', async () => {
     const hub = new ConversationHub({ sessionId: 'int-codex-first', cwd: '/tmp' });
 
-    const session1 = makeSession('codex-thread-001', 'codex', [makeMsg('assistant', 'First reply')]);
+    const session1 = makeSession('codex-thread-001', 'codex', [
+      makeMsg('assistant', 'First reply'),
+    ]);
     const adapter = makeAdapter('codex', 'per-turn-resume', [session1]);
     hub.registerAdapter(adapter);
 
@@ -399,8 +397,8 @@ describe('[6] appendSystemContext — composed system prompt passed via SpawnOpt
     await collect(hub.sendTo('claude', 'test'));
 
     expect(capturedOpts).not.toBeNull();
-    expect(capturedOpts!.systemPrompt).toContain('You are a helpful assistant.');
-    expect(capturedOpts!.systemPrompt).toContain('Prefer concise answers.');
+    expect(capturedOpts?.systemPrompt).toContain('You are a helpful assistant.');
+    expect(capturedOpts?.systemPrompt).toContain('Prefer concise answers.');
   });
 
   it('project layer appears before session layer in composed prompt', async () => {
@@ -422,8 +420,8 @@ describe('[6] appendSystemContext — composed system prompt passed via SpawnOpt
 
     await collect(hub.sendTo('claude', 'test'));
 
-    expect(capturedOpts!.systemPrompt.indexOf('PROJECT_LAYER')).toBeLessThan(
-      capturedOpts!.systemPrompt.indexOf('SESSION_LAYER')
+    expect(capturedOpts?.systemPrompt.indexOf('PROJECT_LAYER')).toBeLessThan(
+      capturedOpts?.systemPrompt.indexOf('SESSION_LAYER')
     );
   });
 
@@ -458,10 +456,10 @@ describe('[6] appendSystemContext — composed system prompt passed via SpawnOpt
     await collect(hub.sendTo('claude', 'test'));
     await collect(hub.sendTo('kimi', 'test'));
 
-    expect(claudeOpts!.systemPrompt).toContain('CLAUDE_ONLY');
-    expect(claudeOpts!.systemPrompt).not.toContain('KIMI_ONLY');
-    expect(kimiOpts!.systemPrompt).toContain('KIMI_ONLY');
-    expect(kimiOpts!.systemPrompt).not.toContain('CLAUDE_ONLY');
+    expect(claudeOpts?.systemPrompt).toContain('CLAUDE_ONLY');
+    expect(claudeOpts?.systemPrompt).not.toContain('KIMI_ONLY');
+    expect(kimiOpts?.systemPrompt).toContain('KIMI_ONLY');
+    expect(kimiOpts?.systemPrompt).not.toContain('CLAUDE_ONLY');
   });
 });
 
@@ -565,9 +563,9 @@ describe('[8] Hub.parallelConsensus — all 3 providers called concurrently', ()
     expect(results.has('codex')).toBe(true);
     expect(results.has('kimi')).toBe(true);
 
-    expect(String(results.get('claude')![0].content)).toContain('Claude reply');
-    expect(String(results.get('codex')![0].content)).toContain('Codex reply');
-    expect(String(results.get('kimi')![0].content)).toContain('Kimi reply');
+    expect(String(results.get('claude')?.[0].content)).toContain('Claude reply');
+    expect(String(results.get('codex')?.[0].content)).toContain('Codex reply');
+    expect(String(results.get('kimi')?.[0].content)).toContain('Kimi reply');
   });
 
   it('captures a failed provider as a system-role entry without blocking the others', async () => {
@@ -595,9 +593,9 @@ describe('[8] Hub.parallelConsensus — all 3 providers called concurrently', ()
 
     const results = await hub.parallelConsensus('test', ['claude', 'codex', 'kimi']);
 
-    expect(results.get('claude')![0].role).toBe('assistant');
-    expect(results.get('codex')![0].role).toBe('system'); // error captured, not thrown
-    expect(results.get('kimi')![0].role).toBe('assistant');
+    expect(results.get('claude')?.[0].role).toBe('assistant');
+    expect(results.get('codex')?.[0].role).toBe('system'); // error captured, not thrown
+    expect(results.get('kimi')?.[0].role).toBe('assistant');
   });
 
   it('sends the same message to every provider', async () => {
@@ -755,7 +753,7 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
     const saved = JSON.parse(readFileSync(filePath, 'utf-8'));
 
     expect(saved.lastThreadIds).toBeDefined();
-    expect(saved.lastThreadIds['codex']).toBe('codex-thread-persist-001');
+    expect(saved.lastThreadIds.codex).toBe('codex-thread-persist-001');
   });
 
   it('persisted JSON file contains history entries with correct roles', async () => {

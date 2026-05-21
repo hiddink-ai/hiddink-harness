@@ -33,7 +33,7 @@ describe('updater', () => {
   });
 
   // Helper to create config file
-  async function createConfig(version = '0.1.0', componentVersions?: Record<string, string>) {
+  async function createConfig(version = '0.0.0', componentVersions?: Record<string, string>) {
     const config = getDefaultConfig();
     config.version = version;
     config.installedAt = '2025-01-01T00:00:00Z';
@@ -61,15 +61,15 @@ describe('updater', () => {
 
   describe('checkForUpdates', () => {
     it('should detect updates when component versions differ', async () => {
-      await createConfig('0.1.0', {
-        rules: '0.1.0',
-        agents: '0.1.0',
+      await createConfig('0.0.0', {
+        rules: '0.0.0',
+        agents: '0.0.0',
       });
 
       const result = await checkForUpdates(tempDir);
 
       // Template version read from manifest.json
-      expect(result.currentVersion).toBe('0.1.0');
+      expect(result.currentVersion).toBe('0.0.0');
       expect(result.latestVersion).toBe(MANIFEST_VERSION);
       expect(result.hasUpdates).toBe(true);
       expect(result.updatableComponents.length).toBeGreaterThan(0);
@@ -105,10 +105,10 @@ describe('updater', () => {
     });
 
     it('should check each component individually', async () => {
-      await createConfig('0.1.0', {
+      await createConfig('0.0.0', {
         rules: MANIFEST_VERSION, // Up to date
-        agents: '0.1.0', // Out of date
-        skills: '0.1.0', // Out of date
+        agents: '0.0.0', // Out of date
+        skills: '0.0.0', // Out of date
       });
 
       const result = await checkForUpdates(tempDir);
@@ -134,7 +134,7 @@ describe('updater', () => {
 
   describe('update', () => {
     it('should update components from templates to target', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create target directory structure
       const layout = getProviderLayout();
@@ -147,7 +147,7 @@ describe('updater', () => {
 
       expect(result.success).toBe(true);
       expect(result.updatedComponents).toContain('rules' as UpdateComponent);
-      expect(result.previousVersion).toBe('0.1.0');
+      expect(result.previousVersion).toBe('0.0.0');
       expect(result.newVersion).toBe(MANIFEST_VERSION);
 
       // Verify config was updated
@@ -197,7 +197,7 @@ describe('updater', () => {
     });
 
     it('should create backup when --backup is true', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create existing component files to backup
       const layout = getProviderLayout();
@@ -217,7 +217,7 @@ describe('updater', () => {
     });
 
     it('should backup entry doc when it exists during backup operation', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create existing entry doc (CLAUDE.md) and component files to backup
       const layout = getProviderLayout();
@@ -239,7 +239,7 @@ describe('updater', () => {
     });
 
     it('should preserve customizations during update', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create customization manifest
       const customFile = '.claude/rules/custom-rule.md';
@@ -267,7 +267,7 @@ describe('updater', () => {
     });
 
     it('should handle dry run without file modifications', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const result = await update({
         targetDir: tempDir,
@@ -288,7 +288,7 @@ describe('updater', () => {
     it('should handle errors gracefully', async () => {
       // Create config in a non-existent directory to trigger error
       // (tempDir exists but we'll try to update with a bad target)
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const result = await update({
         targetDir: '/nonexistent/path/that/does/not/exist',
@@ -300,7 +300,7 @@ describe('updater', () => {
     });
 
     it('should update config version after successful update', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create target directory structure
       const layout = getProviderLayout();
@@ -319,7 +319,7 @@ describe('updater', () => {
     });
 
     it('should handle component update failure and continue with others', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create target directory structure
       const layout = getProviderLayout();
@@ -341,7 +341,7 @@ describe('updater', () => {
     });
 
     it('should disable preservation when preserveCustomizations is false', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create customization manifest
       const customFile = '.claude/rules/custom-rule.md';
@@ -369,7 +369,7 @@ describe('updater', () => {
     });
 
     it('should preserve config preserveFiles even when preserveCustomizations is false', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Update config to include preserveFiles
       const configContent = await readFile(join(tempDir, '.hiddinkrc.json'), 'utf-8');
@@ -409,7 +409,7 @@ describe('updater', () => {
     });
 
     it('should bypass all preservation when forceOverwriteAll is true', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Update config to include preserveFiles
       const configContent = await readFile(join(tempDir, '.hiddinkrc.json'), 'utf-8');
@@ -446,7 +446,7 @@ describe('updater', () => {
     });
 
     it('should override preserveCustomizations when forceOverwriteAll is true', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const manifestPreserveFile = '.claude/rules/manifest-preserved.md';
       await createDirStructure({
@@ -497,9 +497,9 @@ describe('updater', () => {
     it('should skip specific components that are already up-to-date while others have updates', async () => {
       // Config version is old (hasUpdates: true due to version mismatch),
       // but rules component specifically is at latest version (0.3.0)
-      await createConfig('0.1.0', {
+      await createConfig('0.0.0', {
         rules: MANIFEST_VERSION, // rules is already up-to-date
-        agents: '0.1.0', // agents needs update
+        agents: '0.0.0', // agents needs update
       });
 
       const layout = getProviderLayout();
@@ -519,7 +519,7 @@ describe('updater', () => {
     });
 
     it('should update entry doc when no components specified (full update - new file)', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create target directory structure
       const layout = getProviderLayout();
@@ -543,7 +543,7 @@ describe('updater', () => {
     });
 
     it('should merge existing entry doc during full update (no force)', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create target directory structure with existing CLAUDE.md
       const layout = getProviderLayout();
@@ -566,7 +566,7 @@ describe('updater', () => {
     });
 
     it('should force overwrite entry doc during full update with --force', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create target directory structure with existing CLAUDE.md
       const layout = getProviderLayout();
@@ -589,7 +589,7 @@ describe('updater', () => {
     });
 
     it('should update guides component (testing getComponentPath guides path)', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const result = await update({
         targetDir: tempDir,
@@ -601,7 +601,7 @@ describe('updater', () => {
     });
 
     it('should skip custom components that match the component path', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create config with customComponents that should be skipped during update
       const configContent = await readFile(join(tempDir, '.hiddinkrc.json'), 'utf-8');
@@ -634,7 +634,7 @@ describe('updater', () => {
 
   describe('resolveCustomizations edge cases', () => {
     it('should warn and skip invalid path traversal in manifest preserveFiles', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Create manifest with an invalid path that traverses outside project root
       await createDirStructure({
@@ -661,7 +661,7 @@ describe('updater', () => {
     });
 
     it('should merge manifest and config preserveFiles when both have valid paths', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       // Add config-level preserveFiles
       const configContent = await readFile(join(tempDir, '.hiddinkrc.json'), 'utf-8');
@@ -919,7 +919,7 @@ describe('updater', () => {
 
   describe('syncRootLevelFiles (Bug #201)', () => {
     it('should sync root-level files during full update', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -937,7 +937,7 @@ describe('updater', () => {
     });
 
     it('should not sync root-level files when specific components are updated', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -952,7 +952,7 @@ describe('updater', () => {
     });
 
     it('should preserve execute permissions on .sh files', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -970,7 +970,7 @@ describe('updater', () => {
     });
 
     it('should return file list in dry run mode without copying', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -992,7 +992,7 @@ describe('updater', () => {
 
   describe('removeDeprecatedFiles (Bug #202)', () => {
     it('should remove deprecated files during full update', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       // Create a deprecated file that exists in the manifest
@@ -1014,7 +1014,7 @@ describe('updater', () => {
     });
 
     it('should not remove deprecated files when specific components are updated', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await createDirStructure({
@@ -1036,7 +1036,7 @@ describe('updater', () => {
     });
 
     it('should skip deprecated files that do not exist in target', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -1051,7 +1051,7 @@ describe('updater', () => {
     });
 
     it('should return deprecated file list in dry run mode without removing', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await createDirStructure({
@@ -1106,7 +1106,7 @@ describe('updater', () => {
     });
 
     it('should report namespaceSynced: [] when hard is not set', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -1121,7 +1121,7 @@ describe('updater', () => {
     });
 
     it('should run namespace sync when hard is true and update a name mismatch', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       const rulesDir = join(tempDir, layout.rootDir, 'rules');
@@ -1144,7 +1144,7 @@ describe('updater', () => {
     });
 
     it('should not sync user-modified files (hash differs from lockfile)', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -1179,7 +1179,7 @@ describe('updater', () => {
     });
 
     it('should return empty namespaceSynced when no lockfile is present', async () => {
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });
@@ -1202,9 +1202,9 @@ describe('updater', () => {
       // Write a package.json with name "hiddink-harness" to tempDir
       await writeFile(
         join(tempDir, 'package.json'),
-        JSON.stringify({ name: 'hiddink-harness', version: '0.1.0' }, null, 2)
+        JSON.stringify({ name: 'hiddink-harness', version: '0.0.0' }, null, 2)
       );
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const result = await update({
         targetDir: tempDir,
@@ -1219,9 +1219,9 @@ describe('updater', () => {
       // Write a package.json with a different name
       await writeFile(
         join(tempDir, 'package.json'),
-        JSON.stringify({ name: 'my-other-project', version: '0.1.0' }, null, 2)
+        JSON.stringify({ name: 'my-other-project', version: '0.0.0' }, null, 2)
       );
-      await createConfig('0.1.0');
+      await createConfig('0.0.0');
 
       const layout = getProviderLayout();
       await mkdir(join(tempDir, layout.rootDir), { recursive: true });

@@ -14,7 +14,6 @@ import {
 } from '../../../src/core/ontology-rag-setup.js';
 import * as fsUtils from '../../../src/utils/fs.js';
 
-
 describe('ontology-rag-setup', () => {
   let tempDir: string;
   let execSyncSpy: ReturnType<typeof spyOn>;
@@ -127,9 +126,7 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('checkUvAvailableForSetup', () => {
     it('returns true when uv is installed', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       expect(checkUvAvailableForSetup()).toBe(true);
       expect(execSyncSpy).toHaveBeenCalledWith('uv --version', { stdio: 'pipe', timeout: 3000 });
     });
@@ -147,9 +144,7 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('createVenvWithUv', () => {
     it('calls uv venv with --python 3.12 in targetDir', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       createVenvWithUv(tempDir);
       expect(execSyncSpy).toHaveBeenCalledWith('uv venv --python 3.12 .venv', {
         cwd: tempDir,
@@ -171,9 +166,7 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('createVenvWithPython3', () => {
     it('calls python3 -m venv .venv in targetDir', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       createVenvWithPython3(tempDir);
       expect(execSyncSpy).toHaveBeenCalledWith('python3 -m venv .venv', {
         cwd: tempDir,
@@ -195,9 +188,7 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('installOntologyRagEditable', () => {
     it('uses uv pip install when useUv=true', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       installOntologyRagEditable(tempDir, true);
       const call = String(execSyncSpy.mock.calls[0]?.[0] ?? '');
       expect(call).toContain('uv pip install');
@@ -206,9 +197,7 @@ describe('ontology-rag-setup', () => {
     });
 
     it('uses .venv/bin/pip when useUv=false', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       installOntologyRagEditable(tempDir, false);
       const call = String(execSyncSpy.mock.calls[0]?.[0] ?? '');
       expect(call).toContain('.venv/bin/pip install');
@@ -216,9 +205,7 @@ describe('ontology-rag-setup', () => {
     });
 
     it('uses editable install flag -e', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       installOntologyRagEditable(tempDir, true);
       const call = String(execSyncSpy.mock.calls[0]?.[0] ?? '');
       expect(call).toContain(' -e ');
@@ -237,9 +224,7 @@ describe('ontology-rag-setup', () => {
       await mkdir(venvBin, { recursive: true });
       await writeFile(join(venvBin, 'python'), '#!/usr/bin/env python3\n');
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
-        (() => '') as any
-      );
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((() => '') as any);
       // Default python version mock: 3.12
       execSyncSpy.mockImplementation(((cmd: unknown) => {
         if (String(cmd).includes('python3 --version')) return 'Python 3.12.0';

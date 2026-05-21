@@ -86,10 +86,23 @@ describe('E2E: hiddink-harness doctor', () => {
   }
 
   /**
-   * Helper to initialize a project first
+   * Helper to initialize a project by creating the minimal directory structure.
+   * Note: The `init` command was removed in Phase 1a. This helper replaces it
+   * by directly creating the expected project structure.
    */
   async function initProject(): Promise<void> {
-    await runCli('init');
+    await writeFile(join(tempDir, 'CLAUDE.md'), '# Test Project\n');
+    await mkdir(join(tempDir, '.claude', 'rules'), { recursive: true });
+    await mkdir(join(tempDir, '.claude', 'agents'), { recursive: true });
+    await mkdir(join(tempDir, '.claude', 'skills'), { recursive: true });
+    await writeFile(
+      join(tempDir, '.claude', 'rules', 'MUST-test.md'),
+      '# Test Rule\n\n> **Priority**: MUST\n'
+    );
+    await writeFile(
+      join(tempDir, '.claude', 'agents', 'lang-test-agent.md'),
+      '---\nname: lang-test-agent\ndescription: Test agent\nmodel: sonnet\ntools: [Read]\n---\n\n# Test Agent\n'
+    );
   }
 
   /**
@@ -262,32 +275,28 @@ describe('E2E: hiddink-harness doctor', () => {
       ).toBe(true);
     });
 
-    it(
-      'should detect broken symlinks',
-      async () => {
-        await initProject();
+    it('should detect broken symlinks', async () => {
+      await initProject();
 
-        // Create a broken symlink in skills (agents are now flat .md files in .claude/agents)
-        const skillDir = join(tempDir, '.claude', 'skills', 'development', 'test-skill');
-        const refsDir = join(skillDir, 'refs');
-        await mkdir(refsDir, { recursive: true });
-        await writeFile(join(skillDir, 'SKILL.md'), '# Test Skill');
+      // Create a broken symlink in skills (agents are now flat .md files in .claude/agents)
+      const skillDir = join(tempDir, '.claude', 'skills', 'development', 'test-skill');
+      const refsDir = join(skillDir, 'refs');
+      await mkdir(refsDir, { recursive: true });
+      await writeFile(join(skillDir, 'SKILL.md'), '# Test Skill');
 
-        // Create broken symlink
-        const brokenSymlink = join(refsDir, 'broken-link');
-        await symlink('/non/existent/path', brokenSymlink);
+      // Create broken symlink
+      const brokenSymlink = join(refsDir, 'broken-link');
+      await symlink('/non/existent/path', brokenSymlink);
 
-        const result = await runCli('doctor');
+      const result = await runCli('doctor');
 
-        const output = result.stdout;
-        // Should detect broken symlinks
-        expect(output.toLowerCase()).toContain('symlink');
-        expect(
-          output.includes('[FAIL]') || output.includes('fail') || output.includes('broken')
-        ).toBe(true);
-      },
-      15000
-    );
+      const output = result.stdout;
+      // Should detect broken symlinks
+      expect(output.toLowerCase()).toContain('symlink');
+      expect(
+        output.includes('[FAIL]') || output.includes('fail') || output.includes('broken')
+      ).toBe(true);
+    }, 15000);
 
     it('should detect invalid frontmatter in agent files', async () => {
       await initProject();
@@ -363,7 +372,7 @@ invalid yaml content:
       // Verify agents directory doesn't exist
       expect(await pathExists(join(tempDir, '.claude', 'agents'))).toBe(false);
 
-      const _result = await runCli('doctor', '--fix');
+      await runCli('doctor', '--fix');
 
       // Agents directory should now exist
       expect(await pathExists(join(tempDir, '.claude', 'agents'))).toBe(true);
@@ -378,7 +387,7 @@ invalid yaml content:
       // Verify skills directory doesn't exist
       expect(await pathExists(join(tempDir, '.claude', 'skills'))).toBe(false);
 
-      const _result = await runCli('doctor', '--fix');
+      await runCli('doctor', '--fix');
 
       // Skills directory should now exist
       expect(await pathExists(join(tempDir, '.claude', 'skills'))).toBe(true);
@@ -445,7 +454,7 @@ invalid yaml content:
       await runCli('doctor', '--fix');
 
       // Run doctor again without fix
-      const _result = await runCli('doctor');
+      await runCli('doctor');
 
       // After fixing, directories should exist (official Claude Code format)
       expect(await pathExists(join(tempDir, '.claude', 'agents'))).toBe(true);
@@ -530,7 +539,10 @@ invalid: [[[
     });
   });
 
-  describe('integration with init', () => {
+  // NOTE: The `init` command was removed in Phase 1a. This suite tested init→doctor
+  // integration which no longer applies. Skipped rather than deleted to preserve
+  // intent documentation.
+  describe.skip('integration with init', () => {
     it('should pass all checks immediately after init', async () => {
       // Run init
       const initResult = await runCli('init');

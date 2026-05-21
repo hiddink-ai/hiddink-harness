@@ -27,7 +27,7 @@ describe('preserveFiles feature', () => {
   // Helper to create config file
   async function createConfig(overrides?: Partial<OmccConfig>): Promise<void> {
     const config = getDefaultConfig();
-    config.version = '0.1.0';
+    config.version = '0.0.0';
     config.installedAt = '2025-01-01T00:00:00Z';
     if (overrides) {
       Object.assign(config, overrides);
