@@ -1,0 +1,41 @@
+# Dependency Directories
+node_modules/
+packages/*/node_modules/
+.venv/
+bin/
+
+# Build and Compilation outputs
+dist/
+build/
+packages/*/dist/
+packages/*/build/
+coverage/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Environment and Secrets
+.env
+.env.*
+*.local
+*.log
+
+# Hiddink Agent local symlinks and caches
+.claude
+.agy
+.omx
+.kimi
+*-backup-*/
+.hiddink-agent.lock.json
+.hiddink.lock.json
+.mcp.json
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

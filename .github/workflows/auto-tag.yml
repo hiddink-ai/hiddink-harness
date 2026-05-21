@@ -1,0 +1,114 @@
+name: Auto Tag on Release Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+
+concurrency:
+  group: auto-tag
+  cancel-in-progress: false
+
+jobs:
+  auto-tag:
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '20'
+
+      - name: Extract version from package.json
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Extracted version: $TAG"
+
+      - name: Check if tag already exists
+        id: check
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $TAG already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $TAG does not exist, will create"
+          fi
+
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Close linked issues
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          ISSUES=$(echo "$PR_BODY" | grep -oEi '(Closes|Fixes|Resolves)(\s+#[0-9]+)+' | grep -oE '#[0-9]+' | grep -oE '[0-9]+' | sort -u)
+          for ISSUE in $ISSUES; do
+            echo "Closing issue #$ISSUE"
+            gh issue close "$ISSUE" \
+              -c "Closed by ${TAG} release (PR #${PR_NUMBER})" \
+              --repo "$REPO" || echo "⚠ Failed to close #$ISSUE"
+          done
+
+      - name: Close milestone if all issues closed
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Ensure milestone title starts with "v"
+          [[ "$TAG" =~ ^v ]] && milestone_title="$TAG" || milestone_title="v$TAG"
+
+          # Find open milestone with matching title
+          milestone_number=$(gh api "repos/$REPO/milestones?state=open&per_page=100" \
+            --jq ".[] | select(.title == \"$milestone_title\") | .number")
+
+          if [ -z "$milestone_number" ]; then
+            echo "Milestone $milestone_title not found (open) — skip"
+            exit 0
+          fi
+
+          # Check open issues count
+          open_issues=$(gh api "repos/$REPO/milestones/$milestone_number" --jq '.open_issues')
+
+          if [ "$open_issues" -eq 0 ]; then
+            gh api -X PATCH "repos/$REPO/milestones/$milestone_number" -f state=closed
+            echo "Milestone $milestone_title closed (0 open issues)"
+          else
+            echo "Milestone $milestone_title has $open_issues open issues — skip close (will require manual close)"
+          fi
+
+      - name: Delete merged release branch
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          echo "Deleting branch: $BRANCH"
+          git push origin --delete "$BRANCH" || echo "⚠ Branch $BRANCH already deleted or not found"
