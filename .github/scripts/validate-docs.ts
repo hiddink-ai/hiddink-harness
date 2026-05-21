@@ -46,7 +46,9 @@ export async function collectImplementationStats(): Promise<ImplementationStats>
   const templatesDir = 'templates';
 
   // Count agents
-  const agentsDir = path.join(templatesDir, '.claude/agents');
+  // templates/ is now flat: templates/agents/, templates/skills/, templates/rules/
+  // (previously templates/.claude/agents/ etc. — updated for flat SSOT structure)
+  const agentsDir = path.join(templatesDir, 'agents');
   if (fs.existsSync(agentsDir)) {
     const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.md'));
     stats.agent_count = files.length;
@@ -54,7 +56,7 @@ export async function collectImplementationStats(): Promise<ImplementationStats>
   }
 
   // Count skills (directories with SKILL.md)
-  const skillsDir = path.join(templatesDir, '.claude/skills');
+  const skillsDir = path.join(templatesDir, 'skills');
   if (fs.existsSync(skillsDir)) {
     const dirs = fs
       .readdirSync(skillsDir, { withFileTypes: true })
@@ -65,7 +67,7 @@ export async function collectImplementationStats(): Promise<ImplementationStats>
   }
 
   // Count rules
-  const rulesDir = path.join(templatesDir, '.claude/rules');
+  const rulesDir = path.join(templatesDir, 'rules');
   if (fs.existsSync(rulesDir)) {
     stats.rule_count = fs.readdirSync(rulesDir).filter((f) => f.endsWith('.md')).length;
   }
@@ -79,13 +81,13 @@ export async function collectImplementationStats(): Promise<ImplementationStats>
   }
 
   // Count hooks (files, not hidden)
-  const hooksDir = path.join(templatesDir, '.claude/hooks');
+  const hooksDir = path.join(templatesDir, 'hooks');
   if (fs.existsSync(hooksDir)) {
     stats.hook_count = fs.readdirSync(hooksDir).filter((f) => f.endsWith('.json')).length;
   }
 
   // Count contexts
-  const contextsDir = path.join(templatesDir, '.claude/contexts');
+  const contextsDir = path.join(templatesDir, 'contexts');
   if (fs.existsSync(contextsDir)) {
     stats.context_count = fs.readdirSync(contextsDir).filter((f) => f.endsWith('.md')).length;
   }
