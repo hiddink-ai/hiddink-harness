@@ -363,6 +363,18 @@ describe('KimiAdapter', () => {
   // Simulated session — exercises normalizeStreamEvent via send()
   // -----------------------------------------------------------------------
 
+  // -----------------------------------------------------------------------
+  // Real execVersion — covers the base class method body
+  // -----------------------------------------------------------------------
+
+  describe('execVersion() base implementation', () => {
+    it('real execVersion returns true or false depending on whether kimi binary exists', async () => {
+      const realAdapter = new KimiAdapter();
+      const available = await realAdapter.isAvailable();
+      expect(typeof available).toBe('boolean');
+    });
+  });
+
   describe('simulated session send()', () => {
     it('streams delta events through normalizeStreamEvent', async () => {
       const adapter = new TestableKimiAdapter();

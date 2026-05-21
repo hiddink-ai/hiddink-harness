@@ -591,3 +591,28 @@ describe('Hub thread ID persistence flow', () => {
     expect(calls2[0]?.args).toContain('thread-chain-1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// CodexAdapter real spawnProcess — covers the protected method body
+// ---------------------------------------------------------------------------
+
+describe('CodexAdapter — real spawnProcess() coverage', () => {
+  test('CodexAdapter.spawn() returns a session object', async () => {
+    const adapter = new CodexAdapter();
+    const session = await adapter.spawn({
+      sessionId: 'test',
+      cwd: '/tmp',
+      systemPrompt: '',
+    });
+    // Session object is created without spawning a child process yet
+    expect(session.id).toBe(''); // no resumeSessionId, so initial id is ''
+    // Do NOT call session.send() here — that would invoke the real codex binary
+    await session.close();
+  });
+
+  test('CodexAdapter.isAvailable() returns a boolean', async () => {
+    const adapter = new CodexAdapter();
+    const available = await adapter.isAvailable();
+    expect(typeof available).toBe('boolean');
+  });
+});

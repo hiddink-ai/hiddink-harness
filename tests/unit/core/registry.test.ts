@@ -347,4 +347,38 @@ describe('cleanRegistry()', () => {
     const removed = await cleanRegistry();
     expect(removed).toBe(0);
   });
+
+  it('removes temp-path entries that slipped in (isTempPath=true branch)', async () => {
+    const { cleanRegistry, registerProject } = await import('../../../src/core/registry.js');
+
+    // Register a temp-path project directly (bypasses the normal guard)
+    // We use /var/folders which is a known temp path on macOS
+    const tempPath = '/var/folders/fake/project';
+    await registerProject(tempPath, '0.1.0');
+
+    const removed = await cleanRegistry();
+    expect(removed).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('migrateFromLockfiles() — templateVersion field', () => {
+  it('reads templateVersion field when lock file has no version field', async () => {
+    const { migrateFromLockfiles, readRegistry } = await import('../../../src/core/registry.js');
+
+    // Create a project with a lock file using templateVersion (not version) field
+    const projDir = await mkDir(tempRoot, 'template-ver-proj');
+    const lockContent = {
+      templateVersion: '0.50.0',
+      // No 'version' field — tests line 236-237 branch in parseLockFile
+      installedAt: '2025-01-01T00:00:00Z',
+    };
+    await writeFile(join(projDir, '.hiddink.lock.json'), JSON.stringify(lockContent, null, 2));
+
+    await migrateFromLockfiles([tempRoot]);
+
+    const registry = await readRegistry();
+    const entry = registry.projects[projDir];
+    expect(entry).toBeDefined();
+    expect(entry?.version).toBe('0.50.0');
+  });
 });

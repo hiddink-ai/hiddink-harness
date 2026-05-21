@@ -157,17 +157,37 @@ export function cleanupSymlinks(projectId: string, cwd: string = process.cwd()):
  * 안전한 프로세스 수명 주기 클린업 훅을 가동시킵니다.
  */
 let isCleanupRegistered = false;
-export function registerCleanupHandlers(projectId: string, cwd: string = process.cwd()): void {
+
+/**
+ * Resets the cleanup registration guard — for testing only.
+ * @internal
+ */
+export function resetCleanupRegistrationForTesting(): void {
+  isCleanupRegistered = false;
+}
+
+/**
+ * Runs cleanup logic (symlink teardown). Exported so tests can invoke directly.
+ * @internal
+ */
+export function runCleanupForProject(projectId: string, cwd: string): void {
+  try {
+    cleanupSymlinks(projectId, cwd);
+  } catch {
+    // exit 상태에서는 표준 출력 로깅이 무시될 수 있음
+  }
+}
+
+export function registerCleanupHandlers(
+  projectId: string,
+  cwd: string = process.cwd(),
+  /** @internal override process.exit for testing only */
+  exitFn: (code: number) => never = (code) => process.exit(code)
+): void {
   if (isCleanupRegistered) return;
   isCleanupRegistered = true;
 
-  const runCleanup = () => {
-    try {
-      cleanupSymlinks(projectId, cwd);
-    } catch {
-      // exit 상태에서는 표준 출력 로깅이 무시될 수 있음
-    }
-  };
+  const runCleanup = () => runCleanupForProject(projectId, cwd);
 
   // 1. 정상 종료 및 예외 상황 훅
   process.on('exit', runCleanup);
@@ -175,25 +195,26 @@ export function registerCleanupHandlers(projectId: string, cwd: string = process
   // 2. 프로세스 종료 시그널 캐치
   process.on('SIGINT', () => {
     runCleanup();
-    process.exit(0);
+    exitFn(0);
   });
   process.on('SIGTERM', () => {
     runCleanup();
-    process.exit(0);
+    exitFn(0);
   });
 
   // 3. 처리되지 않은 에러 발생 시에도 클린업 수행
   process.on('uncaughtException', (err) => {
     runCleanup();
     console.error('Uncaught Exception occurred, cleaned up symlinks:', err);
-    process.exit(1);
+    exitFn(1);
   });
 }
 
 /**
  * 심볼릭 링크 판단 헬퍼
+ * @internal exported for testing only
  */
-function isLink(path: string): boolean {
+export function isLink(path: string): boolean {
   try {
     return lstatSync(path).isSymbolicLink();
   } catch {
@@ -203,8 +224,9 @@ function isLink(path: string): boolean {
 
 /**
  * 링크 읽기 헬퍼
+ * @internal exported for testing only
  */
-function readLink(path: string): string {
+export function readLink(path: string): string {
   return readlinkSync(path);
 }
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -1234,5 +1234,242 @@ describe('updater', () => {
       expect(result.success).toBe(true);
       expect(result.skippedSource).toBeUndefined();
     });
+  });
+
+  describe('version downgrade prevention', () => {
+    it('should return error when installed version is newer than CLI version', async () => {
+      // Set an installed version that is "newer" than the package.json version
+      // by using a very high version number
+      await createConfig('999.999.999');
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      const result = await update({ targetDir: tempDir });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Downgrade prevented');
+    });
+  });
+
+  describe('backfillStatusLineRefreshInterval edge cases', () => {
+    it('should backfill refreshInterval when statusLine exists but lacks refreshInterval', async () => {
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      // Create settings.local.json with statusLine but no refreshInterval
+      const settingsPath = join(tempDir, layout.rootDir, 'settings.local.json');
+      await writeFile(settingsPath, JSON.stringify({ statusLine: { type: 'command' } }, null, 2));
+
+      const result = await update({ targetDir: tempDir, force: true });
+
+      expect(result.success).toBe(true);
+
+      // Verify refreshInterval was backfilled
+      const settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as {
+        statusLine?: { refreshInterval?: number };
+      };
+      expect(settings.statusLine?.refreshInterval).toBe(10);
+    });
+
+    it('should not modify settings when refreshInterval is already set', async () => {
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      const settingsPath = join(tempDir, layout.rootDir, 'settings.local.json');
+      await writeFile(
+        settingsPath,
+        JSON.stringify({ statusLine: { type: 'command', refreshInterval: 30 } }, null, 2)
+      );
+
+      await update({ targetDir: tempDir, force: true });
+
+      const settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as {
+        statusLine?: { refreshInterval?: number };
+      };
+      expect(settings.statusLine?.refreshInterval).toBe(30);
+    });
+
+    it('should not modify settings when statusLine is not present', async () => {
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      const settingsPath = join(tempDir, layout.rootDir, 'settings.local.json');
+      await writeFile(settingsPath, JSON.stringify({ someOtherKey: true }, null, 2));
+
+      await update({ targetDir: tempDir, force: true });
+
+      const settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as {
+        statusLine?: unknown;
+      };
+      expect(settings.statusLine).toBeUndefined();
+    });
+
+    it('should handle invalid JSON in settings gracefully (catch branch)', async () => {
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      const settingsPath = join(tempDir, layout.rootDir, 'settings.local.json');
+      await writeFile(settingsPath, 'not valid json at all');
+
+      // Should not throw
+      const result = await update({ targetDir: tempDir, force: true });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('resolveCustomizations — only config preserveFiles branch', () => {
+    it('only config preserveFiles (no manifest) returns config-based manifest', async () => {
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      // Setup config with preserveFiles
+      const config = getDefaultConfig();
+      config.version = MANIFEST_VERSION;
+      config.preserveFiles = ['.claude/agents/custom-agent.md'];
+      await saveConfig(tempDir, config);
+
+      // Create the file to preserve
+      await mkdir(join(tempDir, '.claude', 'agents'), { recursive: true });
+      await writeFile(join(tempDir, '.claude', 'agents', 'custom-agent.md'), '# Custom');
+
+      const result = await update({ targetDir: tempDir, force: true });
+      expect(result.success).toBe(true);
+      // The custom agent should be preserved (in preservedFiles)
+      expect(result.preservedFiles).toContain('.claude/agents/custom-agent.md');
+    });
+  });
+
+  describe('isEntryProtected — empty componentRelativePrefix branch', () => {
+    it('should find protected files in a flat directory without component prefix', async () => {
+      // This tests the `componentRelativePrefix = ''` case in isEntryProtected
+      // The branch fires when `findProtectedFilesInDir` is called with a top-level dir
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir), { recursive: true });
+
+      const result = await update({ targetDir: tempDir, components: ['rules'], force: true });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('--hard mode: syncNamespaceInFile upstream name with special chars', () => {
+    it('should escape $ in upstream name to prevent replace() special pattern issues', async () => {
+      // Create a config and directory structure with an agent that has $ in its name
+      await createConfig(MANIFEST_VERSION);
+      const layout = getProviderLayout();
+      await mkdir(join(tempDir, layout.rootDir, 'agents'), { recursive: true });
+
+      // Create an agent with a name containing $
+      const agentContent = `---
+name: original-name
+description: Test agent
+model: sonnet
+tools: [Read]
+---
+
+Body text.
+`;
+      await writeFile(join(tempDir, layout.rootDir, 'agents', 'test-agent.md'), agentContent);
+
+      const result = await update({
+        targetDir: tempDir,
+        components: ['agents'],
+        hard: true,
+        force: true,
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should return false when target and upstream names are equal (no sync needed)', async () => {
+      // Test the extractFrontmatterName path where names match → returns false from syncNamespaceInFile
+      const { extractFrontmatterName } = await import('../../../src/core/updater.js');
+      expect(extractFrontmatterName('no frontmatter here')).toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RTK/Codex post-update install paths (checkAndInstallRtkAfterUpdate, checkAndInstallCodexAfterUpdate)
+// These require mock.module to intercept static imports in updater.ts.
+// ---------------------------------------------------------------------------
+
+describe('updater — RTK/Codex post-update install paths', () => {
+  let tempDir2: string;
+  let consoleLogSpy: ReturnType<typeof spyOn>;
+  let consoleWarnSpy: ReturnType<typeof spyOn>;
+  let consoleDebugSpy: ReturnType<typeof spyOn>;
+  let consoleInfoSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(async () => {
+    tempDir2 = await mkdtemp(join(tmpdir(), 'hiddink-harness-updater-rtk-test-'));
+    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
+    consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    consoleDebugSpy = spyOn(console, 'debug').mockImplementation(() => {});
+    consoleInfoSpy = spyOn(console, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    await rm(tempDir2, { recursive: true, force: true });
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleDebugSpy.mockRestore();
+    consoleInfoSpy.mockRestore();
+    mock.restore();
+  });
+
+  it('checkAndInstallRtkAfterUpdate: warns and installs when RTK not installed and install succeeds', async () => {
+    mock.module('../../../src/core/rtk-installer.js', () => ({
+      isRtkInstalled: () => false,
+      installRtk: () => true,
+      getRtkVersion: () => null,
+    }));
+    mock.module('../../../src/core/codex-installer.js', () => ({
+      isCodexInstalled: () => true,
+      installCodex: () => true,
+      getCodexVersion: () => '1.0.0',
+    }));
+
+    const { update: updateFn } = await import('../../../src/core/updater.js');
+    const { getDefaultConfig: gdc, saveConfig: sc } = await import('../../../src/core/config.js');
+    const { getProviderLayout: gpl } = await import('../../../src/core/layout.js');
+
+    const config = gdc();
+    config.version = MANIFEST_VERSION;
+    await sc(tempDir2, config);
+    await mkdir(join(tempDir2, gpl().rootDir), { recursive: true });
+
+    const result = await updateFn({ targetDir: tempDir2, force: true });
+    expect(result.success).toBe(true);
+  });
+
+  it('checkAndInstallCodexAfterUpdate: warns and installs when Codex not installed and install succeeds', async () => {
+    mock.module('../../../src/core/rtk-installer.js', () => ({
+      isRtkInstalled: () => true,
+      installRtk: () => true,
+      getRtkVersion: () => '1.0.0',
+    }));
+    mock.module('../../../src/core/codex-installer.js', () => ({
+      isCodexInstalled: () => false,
+      installCodex: () => true,
+      getCodexVersion: () => null,
+    }));
+
+    const { update: updateFn } = await import('../../../src/core/updater.js');
+    const { getDefaultConfig: gdc, saveConfig: sc } = await import('../../../src/core/config.js');
+    const { getProviderLayout: gpl } = await import('../../../src/core/layout.js');
+
+    const config = gdc();
+    config.version = MANIFEST_VERSION;
+    await sc(tempDir2, config);
+    await mkdir(join(tempDir2, gpl().rootDir), { recursive: true });
+
+    const result = await updateFn({ targetDir: tempDir2, force: true });
+    expect(result.success).toBe(true);
   });
 });

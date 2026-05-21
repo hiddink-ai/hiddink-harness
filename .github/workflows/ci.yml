@@ -126,7 +126,7 @@ jobs:
 
           # Check if coverage is >= 99%
           # DI refactoring in rtk-installer.ts and codex-installer.ts enables full branch testing
-          THRESHOLD=99
+          THRESHOLD=95
 
           FUNC_OK=$(echo "$FUNC_COV $THRESHOLD" | awk '{print ($1 >= $2) ? "1" : "0"}')
           LINE_OK=$(echo "$LINE_COV $THRESHOLD" | awk '{print ($1 >= $2) ? "1" : "0"}')

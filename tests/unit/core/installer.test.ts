@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import * as fs from 'node:fs/promises';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -908,6 +909,46 @@ describe('installer', () => {
         'utf-8'
       );
       expect(content).toBe('# Important agent memory');
+    });
+  });
+
+  describe('provider-specific entry-md content replacement', () => {
+    it('should install entry-md for codex provider with GPT Codex references', async () => {
+      const result = await install({
+        targetDir: tempDir,
+        provider: 'codex',
+        skipConfirm: true,
+        components: ['entry-md'],
+      });
+
+      expect(result.success).toBe(true);
+
+      // CODEX.md should have been created
+      const entryPath = join(tempDir, 'CODEX.md');
+      if (await fileExists(entryPath)) {
+        const content = await fs.readFile(entryPath, 'utf-8');
+        // Should have .omx references (or GPT Codex) instead of .claude
+        expect(content).not.toContain('.claude');
+      }
+    });
+
+    it('should install entry-md for kimi provider with Kimi references', async () => {
+      const result = await install({
+        targetDir: tempDir,
+        provider: 'kimi',
+        skipConfirm: true,
+        components: ['entry-md'],
+      });
+
+      expect(result.success).toBe(true);
+
+      // KIMI.md should have been created
+      const entryPath = join(tempDir, 'KIMI.md');
+      if (await fileExists(entryPath)) {
+        const content = await fs.readFile(entryPath, 'utf-8');
+        // Should have .kimi references instead of .claude
+        expect(content).not.toContain('.claude');
+      }
     });
   });
 });

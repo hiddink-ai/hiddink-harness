@@ -14,6 +14,7 @@ import {
   getConfigValue,
   getDefaultConfig,
   getDefaultPreferences,
+  getLocalConfigPath,
   loadConfig,
   mergeConfig,
   type OmccConfig,
@@ -76,6 +77,52 @@ describe('config', () => {
     it('should handle paths with trailing slash', () => {
       const path = getConfigPath(tempDir);
       expect(path).toBe(join(tempDir, '.hiddinkrc.json'));
+    });
+
+    it('returns global state dir path when not in test/tmp/coverage context', () => {
+      // Temporarily clear the test env markers to exercise the non-test branch (lines 201-202)
+      const savedNodeEnv = process.env.NODE_ENV;
+      const savedBunEnv = process.env.BUN_ENV;
+      delete process.env.NODE_ENV;
+      delete process.env.BUN_ENV;
+
+      try {
+        // Use a path that doesn't include /tmp/ or coverage/
+        const path = getConfigPath('/my/real/project');
+        // Should return a path inside global state (not directly inside the target)
+        expect(path).not.toBe('/my/real/project/.hiddinkrc.json');
+        expect(path).toContain('.hiddinkrc.json');
+      } finally {
+        if (savedNodeEnv !== undefined) {
+          process.env.NODE_ENV = savedNodeEnv;
+        }
+        if (savedBunEnv !== undefined) {
+          process.env.BUN_ENV = savedBunEnv;
+        }
+      }
+    });
+  });
+
+  describe('getLocalConfigPath', () => {
+    it('returns global state dir path when not in test/tmp/coverage context', () => {
+      // Temporarily clear the test env markers to exercise the non-test branch (lines 217-218)
+      const savedNodeEnv = process.env.NODE_ENV;
+      const savedBunEnv = process.env.BUN_ENV;
+      delete process.env.NODE_ENV;
+      delete process.env.BUN_ENV;
+
+      try {
+        const path = getLocalConfigPath('/my/real/project');
+        expect(path).not.toBe('/my/real/project/.hiddinkrc.local.json');
+        expect(path).toContain('.hiddinkrc.local.json');
+      } finally {
+        if (savedNodeEnv !== undefined) {
+          process.env.NODE_ENV = savedNodeEnv;
+        }
+        if (savedBunEnv !== undefined) {
+          process.env.BUN_ENV = savedBunEnv;
+        }
+      }
     });
   });
 

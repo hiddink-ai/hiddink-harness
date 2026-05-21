@@ -907,6 +907,25 @@ describe('self-update module', () => {
       expect(result.skipped).toBe(true);
     });
 
+    it('should return skipped=true when HIDDINK_HARNESS_SKIP_SELF_UPDATE=true (exact "true" value)', async () => {
+      // Tests line 488: if (env.HIDDINK_HARNESS_SKIP_SELF_UPDATE === 'true')
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        fetchLatestVersion: () => {
+          throw new Error('Should not fetch when env skip is "true"');
+        },
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: { HIDDINK_HARNESS_SKIP_SELF_UPDATE: 'true' },
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(true);
+    });
+
     it('should return skipped=true when legacy HIDDINK_AGENT_SKIP_SELF_UPDATE=true is set', async () => {
       const options: CommandSelfUpdateOptions = {
         currentVersion: '1.0.0',
