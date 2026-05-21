@@ -8,14 +8,14 @@ Claude Code, agy, gpt-codex, Kimi를 위한 범용 에이전트 하네스.
 
 ## 개요
 
-`hiddink-harness`는 여러 AI 코딩 에이전트가 단일 프로젝트 안에서 충돌 없이 공존할 수 있도록 설계된 경량 오케스트레이션 하네스입니다. Claude Code, agy/Antigravity, OpenAI Codex CLI, Kimi는 각자 고유한 디렉토리 규약과 설정 형식을 요구합니다. 조율 레이어 없이는 이 에이전트들이 서로의 상태를 덮어쓰거나 충돌을 일으킵니다. `hiddink-harness`는 에이전트 정의, 스킬, 규칙, 가이드를 SSOT(단일 정보 원천)로 한 번만 작성하고, 필요할 때 각 프로바이더의 네이티브 형식으로 배포함으로써 이 문제를 해결합니다.
+`hiddink-harness`는 여러 AI 코딩 에이전트가 단일 프로젝트 안에서 충돌 없이 공존할 수 있도록 설계된 경량 오케스트레이션 하네스입니다. Claude Code, agy/Antigravity, OpenAI Codex CLI, Kimi는 각자 고유한 디렉토리 규약과 설정 형식을 요구합니다. 조율 레이어 없이는 이 에이전트들이 서로의 상태를 덮어쓰거나 충돌을 일으킵니다. `hiddink-harness`는 `~/.hiddink-harness/` 하위에 단일 SSOT를 두고, 각 provider의 네이티브 디렉터리 레이아웃은 어떤 작업 디렉터리에서든 자동 마운트되는 심볼릭 링크로 노출됩니다.
 
 ---
 
 ## 핵심 기능
 
 1. **멀티 프로바이더 공존**: 각 에이전트는 자체 네이티브 디렉토리 구조(`.claude/`, `.agy/` 등)를 유지합니다. `hiddink-harness`는 `templates/` 하위의 단일 SSOT에서 이 모든 구조를 관리하여 충돌을 원천 차단합니다.
-2. **SSOT 기반 동적 배포**: 에이전트 정의, 행동 규칙, 스킬, 가이드를 한 번만 작성하면 `hiddink-harness init`과 `hiddink-harness update`를 통해 프로바이더별 형식으로 배포됩니다.
+2. **SSOT 기반 자동 마운트**: 에이전트 정의, 행동 규칙, 스킬, 가이드는 전역 SSOT에 한 번만 존재하며, CLI 진입 시 현재 작업 디렉터리에 심볼릭 링크로 마운트되고 종료 시 정리됩니다. `hiddink-harness init`은 선택 사항으로, SSOT에 템플릿을 시드할 때만 사용합니다.
 3. **다국어 지원**: 에이전트 템플릿과 CLI 출력에 한국어/영어 로케일이 지원됩니다. 설정을 분기하지 않고도 개발자별 언어 선호를 반영할 수 있습니다.
 4. **stdio 기반 MCP**: 내장 MCP 서버가 stdio 서브프로세스로 동작하여 네트워크 포트 충돌을 없애고 보안 경계를 단순하게 유지합니다.
 5. **Hub 아키텍처**: `ConversationHub`와 `ProviderAdapter` 패턴이 세 가지 라이프사이클을 처리합니다 — persistent-bidirectional (Claude/Kimi), per-turn-resume (Codex), PTY-wrap (agy, Phase 2).
@@ -48,11 +48,11 @@ Claude Code, agy, gpt-codex, Kimi를 위한 범용 에이전트 하네스.
 
 ```bash
 npm install -g hiddink-harness
-cd your-project
-hiddink-harness init --yes
+cd any-directory          # init 불필요
+hiddink-harness           # 이 CWD를 위한 전역 SSOT 자동 마운트
 ```
 
-`hiddink-harness init`은 전체 템플릿 세트를 배포합니다. 선택한 언어와 환경에 맞게 구성된 `CLAUDE.md`, `.claude/`, 그 외 프로바이더 디렉토리들이 생성됩니다.
+CLI는 CWD 경로에서 결정적 프로젝트 ID를 도출하여 `.claude/`, `.agy/`, `.omx/`, `.kimi/`를 `~/.hiddink-harness/projects/{projectId}/`를 가리키는 심볼릭 링크로 마운트합니다. 템플릿(에이전트, 스킬, 규칙, 가이드)을 SSOT에 시드하려면 `hiddink-harness init`을 한 번 실행하세요. 동일 디렉터리에서의 이후 호출은 같은 SSOT를 재사용합니다.
 
 ---
 
@@ -60,7 +60,7 @@ hiddink-harness init --yes
 
 | 명령어 | 설명 |
 |--------|------|
-| `hiddink-harness init` | 프로젝트 초기화 및 템플릿 배포 |
+| `hiddink-harness init` | 이 CWD를 위해 템플릿을 전역 SSOT에 시드 (선택; 자동 마운트는 init 없이도 동작) |
 | `hiddink-harness update` | 최신 설치 버전에서 템플릿 동기화 |
 | `hiddink-harness list` | 배포된 에이전트, 스킬, 규칙, 가이드 목록 출력 |
 | `hiddink-harness doctor` | 설치 및 설정 상태 진단 |
@@ -77,6 +77,29 @@ hiddink-harness init --yes
 
 ## 아키텍처
 
+### CWD별 symlink 마운트
+
+어느 디렉토리에서든 `hiddink-harness`를 실행하면 CLI가 진입 시 전역 SSOT를 향하는 symlink를 자동으로 마운트하고 종료 시 자동으로 제거합니다. `init` 불필요.
+
+전역 상태 레이아웃:
+
+```
+~/.hiddink-harness/
+├── projects/
+│   └── {projectId}/          # CWD별 결정론적 ID (SHA256 + basename)
+│       ├── .claude/          # Claude Code 상태 SSOT
+│       ├── .agy/
+│       ├── .omx/
+│       └── .kimi/
+├── sessions/                 # 크로스 프로바이더 세션 인덱스
+├── state/                    # active-process.json 등
+└── memory/                   # 장기 메모리
+```
+
+`projectId`는 `src/core/global-state.ts`의 `getProjectId`가 CWD 절대경로를 기반으로 결정론적으로 산출합니다 (`SHA256[:12] + basename`). 동일 디렉토리는 항상 동일한 SSOT 슬롯으로 연결됩니다.
+
+### ConversationHub
+
 핵심 추상화는 `ConversationHub`(`src/core/hub.ts`)입니다. SSOT 대화 상태를 소유하고 프로바이더별 `ProviderAdapter` 구현체(`src/core/providers/`)로 디스패치합니다. 현재 구현된 어댑터는 다음과 같습니다.
 
 - `claude-adapter.ts` — Claude Code와의 영속적 양방향 세션
@@ -90,6 +113,8 @@ CLI는 Commander와 Ink로 구축됩니다. 자동 업데이트 로직은 Comman
 ---
 
 ## 리포지토리 구조
+
+이것은 소스 리포지토리 레이아웃입니다. 사용자 머신에 생성되는 런타임 디렉토리 구조는 위의 [아키텍처 — CWD별 symlink 마운트](#아키텍처) 섹션을 참조하세요.
 
 ```
 hiddink-harness/
@@ -106,6 +131,27 @@ hiddink-harness/
 ├── packages/               # 워크스페이스 패키지 (memory-mcp-server, eval-core)
 └── tests/                  # Bun 테스트 스위트 (2175개 통과)
 ```
+
+---
+
+## 런타임 레이아웃
+
+어느 디렉토리에서든 `hiddink-harness`를 실행하면 CLI가 CWD별 SSOT를 자동으로 생성하고 symlink를 마운트합니다. `init` 불필요.
+
+```
+~/.hiddink-harness/
+├── projects/
+│   └── {projectId}/      # CWD별 결정론적 ID (SHA256 + basename)
+│       ├── .claude/      # Claude Code 상태 (SSOT)
+│       ├── .agy/
+│       ├── .omx/         # OpenAI Codex
+│       └── .kimi/
+├── sessions/             # 크로스 프로바이더 세션 인덱스
+├── state/                # active-process.json
+└── memory/               # 장기 메모리
+```
+
+CLI는 진입 시 현재 디렉토리에 `.claude/`, `.agy/`, `.omx/`, `.kimi/` symlink를 SSOT를 향해 마운트하고 종료 시 제거합니다. projectId는 CWD 경로에서 결정론적으로 산출되므로 같은 디렉토리는 세션 간에도 동일한 SSOT를 재사용합니다.
 
 ---
 

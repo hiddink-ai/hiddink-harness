@@ -2,6 +2,26 @@
 
 Thank you for your interest in contributing to Hiddink Harness!
 
+## Branching Strategy
+
+| Branch | Purpose |
+|--------|---------|
+| `release` | Release trunk (protected, npm publish base) |
+| `develop` | Development trunk (GitHub default) |
+| `feature/<topic>` | New features — branched from develop |
+| `fix/<issue>` | Bug fixes — branched from develop |
+| `docs/<topic>` | Documentation — branched from develop |
+
+Workflow:
+
+1. Branch from `develop`: `git checkout develop && git pull && git checkout -b feature/your-topic`
+2. Commit using Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `ci:`)
+3. Open a PR targeting `develop`
+4. On release cut, a maintainer opens a `develop → release` PR
+5. After merge into `release`, a `v<semver>` tag is pushed → `release.yml` CI publishes to npm
+
+Never push directly to `release`. All changes flow through `develop`.
+
 ## Release Process
 
 When preparing a release, follow the standard branching and tagging guidelines.

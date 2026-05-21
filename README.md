@@ -6,14 +6,14 @@ Universal agent harness for Claude Code, agy, gpt-codex, and Kimi.
 
 ## Overview
 
-`hiddink-harness` is a lightweight orchestration harness that lets multiple AI coding agents coexist peacefully in a single project. Claude Code, agy/Antigravity, OpenAI Codex CLI, and Kimi each expect their own directory conventions and configuration formats. Without a coordination layer, these agents conflict or overwrite each other's state. `hiddink-harness` solves this by acting as a single source of truth (SSOT) that authors agent definitions, skills, rules, and guides once and deploys them in each provider's native format on demand.
+`hiddink-harness` is a lightweight orchestration harness that lets multiple AI coding agents coexist peacefully in a single project. Claude Code, agy/Antigravity, OpenAI Codex CLI, and Kimi each expect their own directory conventions and configuration formats. Without a coordination layer, these agents conflict or overwrite each other's state. `hiddink-harness` solves this by acting as a single source of truth (SSOT) under `~/.hiddink-harness/` and exposing each provider's native directory layout via symlinks that auto-mount in any working directory.
 
 ---
 
 ## Key Features
 
 1. **Multi-provider coexistence**: Each agent gets its own native directory layout (`.claude/`, `.agy/`, etc.). `hiddink-harness` manages all of them from a single SSOT under `templates/`, eliminating conflicts.
-2. **SSOT-based dynamic deployment**: Agent definitions, behavioral rules, skills, and guides are authored once and deployed in provider-specific formats via `hiddink-harness init` and `hiddink-harness update`.
+2. **SSOT-based auto-mount**: Agent definitions, behavioral rules, skills, and guides live once in the global SSOT and are exposed to the current working directory via symlinks that mount on CLI entry and clean up on exit. `hiddink-harness init` is optional — it only seeds templates into the SSOT.
 3. **Internationalization**: Korean and English locales are supported for agent templates and CLI output, allowing per-developer language preferences without forking configurations.
 4. **Stdio-based MCP**: Built-in MCP servers run as stdio subprocesses, eliminating network port conflicts and simplifying security boundaries.
 5. **Hub architecture**: `ConversationHub` with a `ProviderAdapter` pattern handles three lifecycle patterns — persistent-bidirectional (Claude/Kimi), per-turn-resume (Codex), and PTY-wrap (agy, Phase 2).
@@ -46,11 +46,11 @@ Reference documents covering cloud-native design, token efficiency, security pra
 
 ```bash
 npm install -g hiddink-harness
-cd your-project
-hiddink-harness init --yes
+cd any-directory          # no init required
+hiddink-harness           # auto-mounts the global SSOT for this CWD
 ```
 
-`hiddink-harness init` deploys the full template set — `CLAUDE.md`, `.claude/`, and any other provider directories — configured for the selected language and environment.
+The CLI derives a deterministic project ID from the CWD path and mounts `.claude/`, `.agy/`, `.omx/`, `.kimi/` as symlinks pointing to `~/.hiddink-harness/projects/{projectId}/`. To seed the template set (agents, skills, rules, guides) into the SSOT, run `hiddink-harness init` once; subsequent invocations from the same directory reuse the same SSOT.
 
 ---
 
@@ -58,7 +58,7 @@ hiddink-harness init --yes
 
 | Command | Description |
 |---------|-------------|
-| `hiddink-harness init` | Bootstrap a project and deploy templates |
+| `hiddink-harness init` | Seed templates into the global SSOT for this CWD (optional; auto-mount works without it) |
 | `hiddink-harness update` | Sync templates from the latest installed version |
 | `hiddink-harness list` | List deployed agents, skills, rules, and guides |
 | `hiddink-harness doctor` | Diagnose the installation and configuration |
@@ -75,6 +75,29 @@ Global flags: `--auto-self-update`, `--skip-self-update`.
 
 ## Architecture
 
+### Per-CWD symlink mount
+
+Run `hiddink-harness` in any directory — the CLI automatically mounts symlinks pointing to the global SSOT on entry, and cleans them up on exit. No `init` required.
+
+The global state layout is:
+
+```
+~/.hiddink-harness/
+├── projects/
+│   └── {projectId}/          # SHA256-derived deterministic ID per CWD
+│       ├── .claude/          # SSOT for Claude Code state
+│       ├── .agy/
+│       ├── .omx/
+│       └── .kimi/
+├── sessions/                 # Cross-provider session index
+├── state/                    # active-process.json etc.
+└── memory/                   # Long-term memory
+```
+
+`projectId` is computed deterministically from the absolute CWD path (`SHA256[:12] + basename`) by `getProjectId` in `src/core/global-state.ts`, so the same directory always resolves to the same SSOT slot.
+
+### ConversationHub
+
 The core abstraction is the `ConversationHub` (`src/core/hub.ts`), which owns the SSOT conversation state and dispatches to provider-specific `ProviderAdapter` implementations (`src/core/providers/`). The current adapters are:
 
 - `claude-adapter.ts` — persistent bidirectional session with Claude Code
@@ -88,6 +111,8 @@ The CLI is built with Commander and Ink. Self-update logic hooks into Commander'
 ---
 
 ## Repository Layout
+
+This is the source repository layout. For the runtime directory structure created on the user's machine, see the [Architecture — Per-CWD symlink mount](#architecture) section above.
 
 ```
 hiddink-harness/
@@ -104,6 +129,27 @@ hiddink-harness/
 ├── packages/               # Workspace packages (memory-mcp-server, eval-core)
 └── tests/                  # Bun test suite (2175 tests passing)
 ```
+
+---
+
+## Runtime Layout
+
+When you run `hiddink-harness` in any directory, the CLI auto-creates a per-CWD SSOT and mounts symlinks. No `init` required.
+
+```
+~/.hiddink-harness/
+├── projects/
+│   └── {projectId}/      # SHA256-derived deterministic ID per CWD
+│       ├── .claude/      # Claude Code state (SSOT)
+│       ├── .agy/
+│       ├── .omx/         # OpenAI Codex
+│       └── .kimi/
+├── sessions/             # Cross-provider session index
+├── state/                # active-process.json
+└── memory/               # Long-term memory
+```
+
+The CLI auto-mounts `.claude/`, `.agy/`, `.omx/`, `.kimi/` in the current directory as symlinks pointing to the SSOT on entry, and removes them on exit. State persists across sessions because the projectId is derived deterministically from the CWD path.
 
 ---
 
