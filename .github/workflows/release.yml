@@ -87,8 +87,8 @@ jobs:
       - name: Run documentation validation
         run: bun run .github/scripts/validate-docs.ts --programmatic-only
 
-  publish:
-    name: Publish
+  publish-npm:
+    name: Publish npm
     needs: [test, docs-validate]
     runs-on: ubuntu-latest
     steps:
@@ -198,6 +198,16 @@ jobs:
         if: steps.ghp_check.outputs.exists == 'false'
         run: git checkout package.json
 
+  github-release:
+    name: GitHub Release
+    needs: [publish-npm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
       # Extract changelog for this version (with graceful fallback)
       - name: Extract Release Notes
         id: changelog
@@ -261,7 +271,7 @@ jobs:
 
   verify-release:
     name: Verify Release
-    needs: [publish]
+    needs: [github-release]
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
