@@ -1,9 +1,10 @@
 {
   "name": "hiddink-harness",
   "workspaces": [
-    "packages/*"
+    "packages/eval-core",
+    "packages/memory-mcp-server"
   ],
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Universal agent harness for Claude Code, agy, gpt-codex, and Kimi",
   "type": "module",
   "bin": {
@@ -79,7 +80,7 @@
     "cli"
   ],
   "author": "baekenough",
-  "license": "MIT",
+  "license": "LicenseRef-Hiddink-NC-1.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hiddink-ai/hiddink-harness.git"
