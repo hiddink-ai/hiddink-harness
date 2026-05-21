@@ -1,41 +1,47 @@
-# Dependency Directories
-node_modules/
-packages/*/node_modules/
-.venv/
-bin/
+# ──────────────────────────────────────────────────────────────
+# Hiddink Harness — Strict allowlist .gitignore
+#
+# Policy: 현재 리포에 추적된 항목 외의 모든 파일/디렉토리는 무시한다.
+# 새 파일을 추가하려면 이 파일에 명시적으로 화이트리스트를 추가할 것.
+# ──────────────────────────────────────────────────────────────
 
-# Build and Compilation outputs
-dist/
-build/
-packages/*/dist/
-packages/*/build/
-coverage/
+# 1) 루트의 모든 항목을 기본 차단
+/*
 
-# OS specific files
-.DS_Store
-Thumbs.db
+# 2) 추적된 최상위 디렉토리/파일만 허용
+!/.github/
+!/.gitignore
+!/biome.json
+!/bun.lock
+!/bunfig.toml
+!/CONTRIBUTING.md
+!/DEVELOPER_GUIDE.md
+!/guides/
+!/LICENSE
+!/package.json
+!/packages/
+!/README.md
+!/scripts/
+!/src/
+!/templates/
+!/tests/
+!/tsconfig.json
 
-# Environment and Secrets
-.env
-.env.*
-*.local
-*.log
-
-# Hiddink Agent local symlinks and caches
-.claude
-.agy
-.omx
-.kimi
-*-backup-*/
-.hiddink-agent.lock.json
-.hiddink.lock.json
-.mcp.json
-
-# IDEs
-.vscode/
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# 3) 화이트리스트된 디렉토리 내부에서도 일반적인 잡음은 차단
+**/.claude/
+**/.agy/
+**/node_modules/
+**/.venv/
+**/dist/
+**/build/
+**/coverage/
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+**/.env
+**/.env.*
+**/*.local
+**/*-backup-*/
+**/.vscode/
+**/.idea/
+**/*.sw?
