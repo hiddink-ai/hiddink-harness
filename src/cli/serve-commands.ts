@@ -90,9 +90,9 @@ function runForeground(
   spawnSync('node', [join(buildDir, 'index.js')], {
     env: {
       ...process.env,
-      HIDDINK_AGENT_PORT: String(port),
-      HIDDINK_AGENT_HOST: 'localhost',
-      HIDDINK_AGENT_ORIGIN: `http://localhost:${port}`,
+      HIDDINK_HARNESS_PORT: String(port),
+      HIDDINK_HARNESS_HOST: 'localhost',
+      HIDDINK_HARNESS_ORIGIN: `http://localhost:${port}`,
       OMX_PROJECT_ROOT: projectRoot,
     },
     stdio: 'inherit',

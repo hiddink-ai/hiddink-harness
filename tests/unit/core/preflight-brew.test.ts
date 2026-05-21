@@ -50,7 +50,7 @@ describe('preflight - Homebrew integration', () => {
     process.env = { ...originalEnv };
     delete process.env.CI;
     delete process.env.GITHUB_ACTIONS;
-    delete process.env.HIDDINK_AGENT_SKIP_PREFLIGHT;
+    delete process.env.HIDDINK_HARNESS_SKIP_PREFLIGHT;
     execSyncMock.mockReset();
   });
 
@@ -573,8 +573,8 @@ describe('preflight - Homebrew integration', () => {
       expect(result.skipReason).toBe('CI environment detected');
     });
 
-    it('should skip when HIDDINK_AGENT_SKIP_PREFLIGHT is set', async () => {
-      process.env.HIDDINK_AGENT_SKIP_PREFLIGHT = 'true';
+    it('should skip when HIDDINK_HARNESS_SKIP_PREFLIGHT is set', async () => {
+      process.env.HIDDINK_HARNESS_SKIP_PREFLIGHT = 'true';
 
       const result = await runPreflightCheck();
 

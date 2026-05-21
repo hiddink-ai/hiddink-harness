@@ -53,7 +53,11 @@
       "declined": "현재 버전으로 계속 진행합니다.",
       "failed": "자체 업데이트 실패: {{error}}",
       "relaunchFailed": "npx 최신 버전 실행 실패 (status: {{status}}).",
-      "continueAfterFailure": "현재 버전으로 init을 계속 진행합니다."
+      "continueAfterFailure": "현재 버전으로 init을 계속 진행합니다.",
+      "upgradeApplied": "✓ hiddink-harness를 {{version}}로 업그레이드했습니다. 명령어를 다시 실행해 주세요.",
+      "upgradeBanner": "⚠ hiddink-harness {{latest}} 사용 가능 (현재: {{current}}). --auto-self-update 또는 `hiddink-harness update` 실행",
+      "autoSelfUpdateOption": "확인 없이 hiddink-harness 자동 업그레이드",
+      "skipSelfUpdateOption": "hiddink-harness 자체 업데이트 확인 건너뛰기"
     },
     "init": {
       "description": "현재 디렉토리에 hiddink-harness 초기화",

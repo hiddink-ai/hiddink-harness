@@ -6,7 +6,7 @@
  * host) can connect via the standard stdio channel.
  *
  * DB path resolution order:
- *   1. HIDDINK_AGENT_MEMORY_DB environment variable
+ *   1. HIDDINK_HARNESS_MEMORY_DB environment variable
  *   2. ~/.hiddink-harness/memory.db  (default)
  */
 

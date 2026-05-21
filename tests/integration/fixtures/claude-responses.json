@@ -1,0 +1,32 @@
+[
+  {
+    "description": "Session init event — resolves session ID in StreamJsonAdapterBase.spawn()",
+    "event": { "type": "system", "subtype": "init", "session_id": "claude-int-session-001", "version": "2.0" }
+  },
+  {
+    "description": "Streaming text delta — normalised to NormalizedMessage{role:'assistant', content:[{type:'text'}]}",
+    "event": {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": { "type": "text_delta", "text": "안녕하세요! Claude입니다." }
+      }
+    }
+  },
+  {
+    "description": "Tool-use start — normalised to NormalizedMessage{role:'tool', content:[{type:'tool_use'}]}",
+    "event": {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_start",
+        "index": 1,
+        "content_block": { "type": "tool_use", "id": "tool_abc", "name": "Read", "input": { "path": "/tmp/x" } }
+      }
+    }
+  },
+  {
+    "description": "Result event — discarded by ClaudeAdapter (returns null from normalizeStreamEvent)",
+    "event": { "type": "result", "subtype": "success" }
+  }
+]

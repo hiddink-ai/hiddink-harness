@@ -17,7 +17,9 @@ import { join } from 'node:path';
 // ============================================================================
 
 // Mock child_process functions
-const mockExecSync = mock((cmd: string) => {
+// Use explicit generic to prevent TypeScript narrowing the return to literal string types,
+// which would cause type errors when mockImplementationOnce returns other strings.
+const mockExecSync = mock<(cmd: string) => string>((cmd: string) => {
   if (cmd.includes('npm view')) {
     return '"1.5.0"\n';
   }
@@ -27,7 +29,17 @@ const mockExecSync = mock((cmd: string) => {
   throw new Error(`Unexpected execSync call: ${cmd}`);
 });
 
-const mockSpawnSync = mock(() => ({
+// Use explicit generic to allow status: number|null and signal: NodeJS.Signals|null
+const mockSpawnSync = mock<
+  () => {
+    status: number | null;
+    stdout: Buffer;
+    stderr: Buffer;
+    pid: number;
+    output: (Buffer | null)[];
+    signal: NodeJS.Signals | null;
+  }
+>(() => ({
   status: 0,
   stdout: Buffer.from(''),
   stderr: Buffer.from(''),
@@ -158,7 +170,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should parse version from non-JSON output', () => {
-      mockExecSync.mockImplementationOnce(() => '2.3.4\n');
+      mockExecSync.mockImplementationOnce((): string => '2.3.4\n');
 
       const version = fetchLatestVersionFromNpm('test-package');
 
@@ -166,7 +178,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should return null when output is empty', () => {
-      mockExecSync.mockImplementationOnce(() => '   \n');
+      mockExecSync.mockImplementationOnce((): string => '   \n');
 
       const version = fetchLatestVersionFromNpm('test-package');
 
@@ -184,7 +196,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should normalize version with v prefix', () => {
-      mockExecSync.mockImplementationOnce(() => 'v3.1.0\n');
+      mockExecSync.mockImplementationOnce((): string => 'v3.1.0\n');
 
       const version = fetchLatestVersionFromNpm('test-package');
 
@@ -192,7 +204,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should normalize version with prerelease', () => {
-      mockExecSync.mockImplementationOnce(() => '"1.2.3-beta.1"\n');
+      mockExecSync.mockImplementationOnce((): string => '"1.2.3-beta.1"\n');
 
       const version = fetchLatestVersionFromNpm('test-package');
 
@@ -206,7 +218,7 @@ describe('self-update integration tests', () => {
 
   describe('maybeHandleSelfUpdateForInit with interactive session', () => {
     it('should update global installation when user accepts (non-npx)', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) return '';
         throw new Error(`Unexpected: ${cmd}`);
@@ -236,7 +248,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should relaunch with npx when user accepts (npx invocation)', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         throw new Error(`Unexpected: ${cmd}`);
       });
@@ -258,7 +270,7 @@ describe('self-update integration tests', () => {
         env: {},
       };
 
-      await expect(maybeHandleSelfUpdateForInit(options)).rejects.toThrow('process.exit(0) called');
+      expect(maybeHandleSelfUpdateForInit(options)).rejects.toThrow('process.exit(0) called');
 
       // Should have called spawnSync with npx
       expect(mockSpawnSync).toHaveBeenCalledWith(
@@ -267,14 +279,14 @@ describe('self-update integration tests', () => {
         expect.objectContaining({
           stdio: 'inherit',
           env: expect.objectContaining({
-            HIDDINK_AGENT_SKIP_SELF_UPDATE: 'true',
+            HIDDINK_HARNESS_SKIP_SELF_UPDATE: 'true',
           }),
         })
       );
     });
 
     it('should print declined message when user declines', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         throw new Error(`Unexpected: ${cmd}`);
       });
@@ -303,7 +315,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should return early when no update available', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.0.0"\n';
         throw new Error(`Unexpected: ${cmd}`);
       });
@@ -370,7 +382,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should handle failed npx relaunch and print warning', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         throw new Error(`Unexpected: ${cmd}`);
       });
@@ -403,7 +415,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should handle failed global update and print warning', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) {
           throw new Error('Permission denied');
@@ -432,18 +444,18 @@ describe('self-update integration tests', () => {
     });
 
     it('should handle npx relaunch with null status', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         throw new Error(`Unexpected: ${cmd}`);
       });
 
       mockSpawnSync.mockImplementationOnce(() => ({
-        status: null,
+        status: null as number | null,
         stdout: Buffer.from(''),
         stderr: Buffer.from(''),
         pid: 12345,
-        output: [],
-        signal: 'SIGTERM',
+        output: [] as (Buffer | null)[],
+        signal: 'SIGTERM' as NodeJS.Signals | null,
       }));
 
       const options: SelfUpdateOptions = {
@@ -461,7 +473,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should print continuation spacing after warnings', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) {
           throw new Error('Failed');
@@ -484,7 +496,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should accept empty answer as yes', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) return '';
         throw new Error(`Unexpected: ${cmd}`);
@@ -510,7 +522,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should accept "yes" as affirmative', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) return '';
         throw new Error(`Unexpected: ${cmd}`);
@@ -536,7 +548,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should handle mixed-case answer', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) return '';
         throw new Error(`Unexpected: ${cmd}`);
@@ -562,7 +574,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should close readline interface after prompting', async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.5.0"\n';
         if (cmd.includes('npm install -g')) return '';
         throw new Error(`Unexpected: ${cmd}`);
@@ -585,7 +597,7 @@ describe('self-update integration tests', () => {
 
   describe('executeSelfUpdate CLI integration', () => {
     it('should successfully execute global update when update is available', () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.2.0"\n';
         if (cmd.includes('npm install -g')) return '';
         throw new Error(`Unexpected command: ${cmd}`);
@@ -612,7 +624,7 @@ describe('self-update integration tests', () => {
     });
 
     it('should return updated=false when global npm installation fails', () => {
-      mockExecSync.mockImplementation((cmd: string) => {
+      mockExecSync.mockImplementation((cmd: string): string => {
         if (cmd.includes('npm view')) return '"1.2.0"\n';
         if (cmd.includes('npm install -g')) {
           throw new Error('EACCES: permission denied');

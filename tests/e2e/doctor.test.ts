@@ -11,7 +11,7 @@ import { spawn } from 'bun';
 import { unregisterProject } from '../../src/core/registry.js';
 
 // Set 30s timeout for E2E tests (CI environments are slower)
-describe('E2E: hiddink-harness doctor', { timeout: 30000 }, () => {
+describe('E2E: hiddink-harness doctor', () => {
   let tempDir: string;
   let cliPath: string;
 
@@ -48,8 +48,8 @@ describe('E2E: hiddink-harness doctor', { timeout: 30000 }, () => {
       stderr: 'pipe',
       env: {
         ...process.env,
-        HIDDINK_AGENT_REGISTRY_DIR: join(tempDir, '.hiddink-harness-registry'),
-        HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP: '1',
+        HIDDINK_HARNESS_REGISTRY_DIR: join(tempDir, '.hiddink-harness-registry'),
+        HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP: '1',
       },
     });
 
@@ -262,28 +262,32 @@ describe('E2E: hiddink-harness doctor', { timeout: 30000 }, () => {
       ).toBe(true);
     });
 
-    it('should detect broken symlinks', { timeout: 15000 }, async () => {
-      await initProject();
+    it(
+      'should detect broken symlinks',
+      async () => {
+        await initProject();
 
-      // Create a broken symlink in skills (agents are now flat .md files in .claude/agents)
-      const skillDir = join(tempDir, '.claude', 'skills', 'development', 'test-skill');
-      const refsDir = join(skillDir, 'refs');
-      await mkdir(refsDir, { recursive: true });
-      await writeFile(join(skillDir, 'SKILL.md'), '# Test Skill');
+        // Create a broken symlink in skills (agents are now flat .md files in .claude/agents)
+        const skillDir = join(tempDir, '.claude', 'skills', 'development', 'test-skill');
+        const refsDir = join(skillDir, 'refs');
+        await mkdir(refsDir, { recursive: true });
+        await writeFile(join(skillDir, 'SKILL.md'), '# Test Skill');
 
-      // Create broken symlink
-      const brokenSymlink = join(refsDir, 'broken-link');
-      await symlink('/non/existent/path', brokenSymlink);
+        // Create broken symlink
+        const brokenSymlink = join(refsDir, 'broken-link');
+        await symlink('/non/existent/path', brokenSymlink);
 
-      const result = await runCli('doctor');
+        const result = await runCli('doctor');
 
-      const output = result.stdout;
-      // Should detect broken symlinks
-      expect(output.toLowerCase()).toContain('symlink');
-      expect(
-        output.includes('[FAIL]') || output.includes('fail') || output.includes('broken')
-      ).toBe(true);
-    });
+        const output = result.stdout;
+        // Should detect broken symlinks
+        expect(output.toLowerCase()).toContain('symlink');
+        expect(
+          output.includes('[FAIL]') || output.includes('fail') || output.includes('broken')
+        ).toBe(true);
+      },
+      15000
+    );
 
     it('should detect invalid frontmatter in agent files', async () => {
       await initProject();

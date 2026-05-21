@@ -11,7 +11,7 @@
  *
  * All failures are non-fatal — a warning is printed and init continues.
  *
- * Set HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP=1 to bypass all subprocess calls
+ * Set HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP=1 to bypass all subprocess calls
  * (useful in CI or test environments that do not have Python/uv available).
  */
 
@@ -158,8 +158,8 @@ export function installOntologyRagEditable(targetDir: string, useUv: boolean): v
  */
 export async function setupOntologyRag(targetDir: string): Promise<OntologyRagSetupResult> {
   // Fast-skip: honour opt-out env var (useful in CI and test environments).
-  if (process.env.HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP === '1') {
-    const statusLine = 'ontology-rag MCP: ⚠ skipped (HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP=1)';
+  if (process.env.HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP === '1') {
+    const statusLine = 'ontology-rag MCP: ⚠ skipped (HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP=1)';
     console.warn(`Warning: ${statusLine}`);
     return { success: false, statusLine, reason: 'skipped via env var' };
   }

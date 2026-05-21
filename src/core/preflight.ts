@@ -98,7 +98,7 @@ interface BrewOutdated {
  * Check if running in CI environment
  */
 export function isCI(): boolean {
-  const ciEnvVars = ['CI', 'GITHUB_ACTIONS', 'HIDDINK_AGENT_SKIP_PREFLIGHT'];
+  const ciEnvVars = ['CI', 'GITHUB_ACTIONS', 'HIDDINK_HARNESS_SKIP_PREFLIGHT'];
   return ciEnvVars.some((envVar) => process.env[envVar] === 'true');
 }
 

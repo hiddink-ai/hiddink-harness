@@ -53,7 +53,11 @@
       "declined": "Continuing with current version.",
       "failed": "Self-update failed: {{error}}",
       "relaunchFailed": "Failed to launch latest version via npx (status: {{status}}).",
-      "continueAfterFailure": "Continuing init with current version."
+      "continueAfterFailure": "Continuing init with current version.",
+      "upgradeApplied": "✓ Upgraded hiddink-harness to {{version}}, please re-run the command.",
+      "upgradeBanner": "⚠ hiddink-harness {{latest}} available (current: {{current}}). Run with --auto-self-update or `hiddink-harness update`",
+      "autoSelfUpdateOption": "Automatically upgrade hiddink-harness without prompting",
+      "skipSelfUpdateOption": "Skip hiddink-harness self-update check"
     },
     "init": {
       "description": "Initialize hiddink-harness in the current directory",

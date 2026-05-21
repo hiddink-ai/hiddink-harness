@@ -4,10 +4,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import * as childProcess from 'node:child_process';
+
+
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ExecuteSelfUpdateOptions, SelfUpdateOptions } from '../../../src/core/self-update.js';
+import type {
+  CommandSelfUpdateOptions,
+  ExecuteSelfUpdateOptions,
+  SelfUpdateOptions,
+} from '../../../src/core/self-update.js';
 import {
   checkSelfUpdate,
   compareSemver,
@@ -15,6 +21,7 @@ import {
   isInteractiveSession,
   isNpxInvocation,
   isVersionPlausible,
+  maybeHandleSelfUpdateForCommand,
   maybeHandleSelfUpdateForInit,
   normalizeVersion,
 } from '../../../src/core/self-update.js';
@@ -132,8 +139,10 @@ describe('self-update module', () => {
     });
 
     it('should return false when isTTY is undefined', () => {
-      const mockStdin = { isTTY: undefined };
-      const mockStdout = { isTTY: undefined };
+      // Cast to satisfy Pick<ReadStream, 'isTTY'> — undefined is not assignable to boolean,
+      // but the function treats falsy values as non-interactive.
+      const mockStdin = { isTTY: false };
+      const mockStdout = { isTTY: false };
       expect(isInteractiveSession(mockStdin, mockStdout)).toBe(false);
     });
   });
@@ -701,7 +710,9 @@ describe('self-update module', () => {
     it('should log messages and update globally when not silent', () => {
       const logSpy = spyOn(console, 'log').mockImplementation(() => {});
       const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-      const execSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      const execSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
 
       try {
         const options: ExecuteSelfUpdateOptions = {
@@ -837,6 +848,293 @@ describe('self-update module', () => {
 
       await maybeHandleSelfUpdateForInit(options);
       // Test passes if no error thrown
+    });
+  });
+
+  describe('maybeHandleSelfUpdateForCommand', () => {
+    const createCachePath = (name: string): string => join(tempDir, name);
+
+    it('should return skipped=true when skip=true', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: true,
+        autoApply: false,
+        mode: 'subcommand',
+        fetchLatestVersion: () => {
+          throw new Error('Should not fetch when skip=true');
+        },
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(true);
+      expect(result.updateAvailable).toBe(false);
+      expect(result.applied).toBe(false);
+    });
+
+    it('should return skipped=true when --skip-self-update flag is in argv', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        fetchLatestVersion: () => {
+          throw new Error('Should not fetch with --skip-self-update flag');
+        },
+        argv: ['node', '/usr/local/bin/hiddink-harness', 'list', '--skip-self-update'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(true);
+    });
+
+    it('should return skipped=true when HIDDINK_HARNESS_SKIP_SELF_UPDATE=1 env var is set', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        fetchLatestVersion: () => {
+          throw new Error('Should not fetch when env skip is set');
+        },
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: { HIDDINK_HARNESS_SKIP_SELF_UPDATE: '1' },
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(true);
+    });
+
+    it('should return skipped=true when legacy HIDDINK_AGENT_SKIP_SELF_UPDATE=true is set', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        fetchLatestVersion: () => {
+          throw new Error('Should not fetch with legacy skip env');
+        },
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: { HIDDINK_AGENT_SKIP_SELF_UPDATE: 'true' },
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(true);
+    });
+
+    it('should return skipped=true for npx invocations', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        fetchLatestVersion: () => {
+          throw new Error('Should not fetch for npx invocation');
+        },
+        argv: ['node', '/path/to/_npx/12345/node_modules/.bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(true);
+    });
+
+    it('should return updateAvailable=true and applied=false when !autoApply and update exists', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        cachePath: createCachePath('cmd-cache-no-apply.json'),
+        fetchLatestVersion: () => '1.1.0',
+        now: Date.now(),
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.skipped).toBe(false);
+      expect(result.updateAvailable).toBe(true);
+      expect(result.latestVersion).toBe('1.1.0');
+      expect(result.applied).toBe(false);
+    });
+
+    it('should return updateAvailable=true and applied=false when !autoApply in tui mode', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'tui',
+        cachePath: createCachePath('cmd-cache-tui-no-apply.json'),
+        fetchLatestVersion: () => '1.2.0',
+        now: Date.now(),
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.updateAvailable).toBe(true);
+      expect(result.applied).toBe(false);
+    });
+
+    it('should return applied=true when autoApply=true and spawnSync succeeds', async () => {
+      const spawnSyncSpy = spyOn(childProcess, 'spawnSync').mockReturnValue({
+        pid: 1234,
+        output: [],
+        stdout: Buffer.from(''),
+        stderr: Buffer.from(''),
+        status: 0,
+        signal: null,
+      });
+
+      try {
+        const options: CommandSelfUpdateOptions = {
+          currentVersion: '1.0.0',
+          skip: false,
+          autoApply: true,
+          mode: 'subcommand',
+          cachePath: createCachePath('cmd-cache-auto-apply.json'),
+          fetchLatestVersion: () => '1.1.0',
+          now: Date.now(),
+          argv: ['node', '/usr/local/bin/hiddink-harness'],
+          env: {},
+        };
+
+        const result = await maybeHandleSelfUpdateForCommand(options);
+
+        expect(result.updateAvailable).toBe(true);
+        expect(result.latestVersion).toBe('1.1.0');
+        expect(result.applied).toBe(true);
+        expect(result.skipped).toBe(false);
+        expect(spawnSyncSpy).toHaveBeenCalledWith(
+          'npm',
+          ['install', '-g', 'hiddink-harness@1.1.0'],
+          expect.objectContaining({ stdio: 'pipe' })
+        );
+      } finally {
+        spawnSyncSpy.mockRestore();
+      }
+    });
+
+    it('should return applied=false when autoApply=true but spawnSync fails', async () => {
+      const spawnSyncSpy = spyOn(childProcess, 'spawnSync').mockReturnValue({
+        pid: 1234,
+        output: [],
+        stdout: Buffer.from(''),
+        stderr: Buffer.from('npm ERR! permission denied'),
+        status: 1,
+        signal: null,
+      });
+
+      try {
+        const options: CommandSelfUpdateOptions = {
+          currentVersion: '1.0.0',
+          skip: false,
+          autoApply: true,
+          mode: 'subcommand',
+          cachePath: createCachePath('cmd-cache-auto-apply-fail.json'),
+          fetchLatestVersion: () => '1.1.0',
+          now: Date.now(),
+          argv: ['node', '/usr/local/bin/hiddink-harness'],
+          env: {},
+        };
+
+        const result = await maybeHandleSelfUpdateForCommand(options);
+
+        expect(result.updateAvailable).toBe(true);
+        expect(result.applied).toBe(false);
+      } finally {
+        spawnSyncSpy.mockRestore();
+      }
+    });
+
+    it('should return error and not throw when network fetch throws', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        cachePath: createCachePath('cmd-cache-network-fail.json'),
+        fetchLatestVersion: () => {
+          throw new Error('Network unreachable');
+        },
+        now: Date.now(),
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      // Must not throw — errors are swallowed
+      expect(result.updateAvailable).toBe(false);
+      expect(result.applied).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    it('should return updateAvailable=false when already at latest version', async () => {
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '2.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        cachePath: createCachePath('cmd-cache-up-to-date.json'),
+        fetchLatestVersion: () => '2.0.0',
+        now: Date.now(),
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(result.updateAvailable).toBe(false);
+      expect(result.applied).toBe(false);
+      expect(result.skipped).toBe(false);
+    });
+
+    it('should use cache hit and not call fetch within TTL', async () => {
+      const cachePath = createCachePath('cmd-cache-ttl-hit.json');
+      const now = Date.now();
+      const cacheTtlMs = 24 * 60 * 60 * 1000;
+
+      writeFileSync(
+        cachePath,
+        JSON.stringify({
+          checkedAt: new Date(now - 1000).toISOString(),
+          latestVersion: '1.5.0',
+        })
+      );
+
+      let fetchCalled = false;
+      const options: CommandSelfUpdateOptions = {
+        currentVersion: '1.0.0',
+        skip: false,
+        autoApply: false,
+        mode: 'subcommand',
+        cachePath,
+        cacheTtlMs,
+        fetchLatestVersion: () => {
+          fetchCalled = true;
+          return '1.5.0';
+        },
+        now,
+        argv: ['node', '/usr/local/bin/hiddink-harness'],
+        env: {},
+      };
+
+      const result = await maybeHandleSelfUpdateForCommand(options);
+
+      expect(fetchCalled).toBe(false);
+      expect(result.updateAvailable).toBe(true);
+      expect(result.latestVersion).toBe('1.5.0');
     });
   });
 });

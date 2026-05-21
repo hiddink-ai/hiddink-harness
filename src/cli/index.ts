@@ -14,7 +14,10 @@ import {
 } from '../core/global-state.js';
 import { formatPreflightWarnings, runPreflightCheck } from '../core/preflight.js';
 import { unregisterProject } from '../core/registry.js';
-import { maybeHandleSelfUpdateForInit } from '../core/self-update.js';
+import {
+  maybeHandleSelfUpdateForCommand,
+  maybeHandleSelfUpdateForInit,
+} from '../core/self-update.js';
 import { detectLanguage, i18n, initI18n } from '../i18n/index.js';
 import { doctorCommand } from './doctor.js';
 import { initCommand } from './init.js';
@@ -46,6 +49,8 @@ export function createProgram(): Command {
     .description(i18n.t('cli.description'))
     .version(packageJson.version, '-v, --version', i18n.t('cli.versionOption'))
     .option('--skip-version-check', 'Skip CLI version pre-flight check')
+    .option('--auto-self-update', 'Automatically upgrade hiddink-harness without prompting')
+    .option('--skip-self-update', 'Skip hiddink-harness self-update check')
     .action(async () => {
       const cwd = process.cwd();
       const projectId = getProjectId(cwd);
@@ -272,7 +277,11 @@ export function createProgram(): Command {
       registerCleanupHandlers(projectId, cwd);
     }
 
-    const opts = thisCommand.optsWithGlobals() as { skipVersionCheck?: boolean };
+    const opts = thisCommand.optsWithGlobals() as {
+      skipVersionCheck?: boolean;
+      autoSelfUpdate?: boolean;
+      skipSelfUpdate?: boolean;
+    };
     const skipCheck = opts.skipVersionCheck || false;
 
     const cmdName = actionCommand.name();
@@ -286,10 +295,42 @@ export function createProgram(): Command {
     }
 
     if (cmdName === 'init') {
+      // init uses the interactive prompt flow — keep existing behavior
       await maybeHandleSelfUpdateForInit({
         currentVersion: packageJson.version,
         skip: skipCheck,
       });
+    } else {
+      // All other commands: non-blocking self-update check
+      const autoApply =
+        opts.autoSelfUpdate === true || process.env.HIDDINK_HARNESS_AUTO_SELF_UPDATE === '1';
+      const skipSelfUpdate = opts.skipSelfUpdate === true;
+
+      // Determine whether we are in TUI mode (no-arg default action)
+      // The default action is registered directly on `program`, so its name() is
+      // the program name ("hiddink-harness") rather than a subcommand name.
+      const isTuiMode = cmdName === 'hiddink-harness' || cmdName === program.name();
+
+      const selfUpdateResult = await maybeHandleSelfUpdateForCommand({
+        currentVersion: packageJson.version,
+        skip: skipSelfUpdate,
+        autoApply,
+        mode: isTuiMode ? 'tui' : 'subcommand',
+      });
+
+      if (selfUpdateResult.applied && selfUpdateResult.latestVersion) {
+        // Newly installed version is in a different binary — must re-exec
+        process.stderr.write(
+          `✓ Upgraded hiddink-harness to ${selfUpdateResult.latestVersion}, please re-run the command.\n`
+        );
+        process.exit(0);
+      } else if (selfUpdateResult.updateAvailable && selfUpdateResult.latestVersion) {
+        // Print a one-line notice to stderr so it does not pollute stdout
+        process.stderr.write(
+          `⚠ hiddink-harness ${selfUpdateResult.latestVersion} available (current: ${packageJson.version}). Run with --auto-self-update or \`hiddink-harness update\`\n`
+        );
+      }
+      // error / skipped / no update → silent
     }
 
     const result = await runPreflightCheck({ skip: skipCheck });

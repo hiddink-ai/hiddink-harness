@@ -61,7 +61,7 @@ describe('serve-commands.ts', () => {
       try {
         await expect(serveCommand({ port: 'abc' })).rejects.toThrow('process.exit called');
 
-        const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(errorOutput).toContain('abc');
       } finally {
         processExitSpy.mockRestore();
@@ -109,7 +109,7 @@ describe('serve-commands.ts', () => {
           serveCommand({ port: '4321', foreground: true, _projectRoot: emptyTempDir })
         ).rejects.toThrow('process.exit called');
 
-        const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(errorOutput).toContain('build');
       } finally {
         processExitSpy.mockRestore();
@@ -148,7 +148,7 @@ describe('serve-commands.ts', () => {
           'process.exit called'
         );
 
-        const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(errorOutput.length).toBeGreaterThan(0);
       } finally {
         processExitSpy.mockRestore();
@@ -171,7 +171,7 @@ describe('serve-commands.ts', () => {
       // isServeRunning() returns true → console.log started message (line 44)
       await serveCommand({ port: '4321' });
 
-      const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(logOutput).toContain('4321');
     });
   });
@@ -199,7 +199,7 @@ describe('serve-commands.ts', () => {
         await serveStopCommand();
 
         // stopServe returns true → console.log stopped message (line 60)
-        const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(logOutput).toContain('stopped');
       } finally {
         killSpy.mockRestore();

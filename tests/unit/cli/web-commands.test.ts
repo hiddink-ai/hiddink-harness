@@ -56,14 +56,14 @@ describe('web-commands.ts', () => {
     it('should print "not running" message when no PID file exists', async () => {
       await webStatusCommand();
 
-      const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(logOutput).toContain('not running');
     });
 
     it('should print the start hint when server is not running', async () => {
       await webStatusCommand();
 
-      const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(logOutput).toContain('hiddink-harness web start');
     });
 
@@ -73,26 +73,26 @@ describe('web-commands.ts', () => {
 
       await webStatusCommand();
 
-      const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(logOutput).toContain('running');
       expect(logOutput).toContain('localhost');
     });
 
-    it('should use HIDDINK_AGENT_PORT env var in the running URL when set', async () => {
-      const origPort = process.env.HIDDINK_AGENT_PORT;
-      process.env.HIDDINK_AGENT_PORT = '9876';
+    it('should use HIDDINK_HARNESS_PORT env var in the running URL when set', async () => {
+      const origPort = process.env.HIDDINK_HARNESS_PORT;
+      process.env.HIDDINK_HARNESS_PORT = '9876';
 
       try {
         await writeFile(PID_FILE, String(process.pid), 'utf-8');
         await webStatusCommand();
 
-        const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(logOutput).toContain('9876');
       } finally {
         if (origPort === undefined) {
-          delete process.env.HIDDINK_AGENT_PORT;
+          delete process.env.HIDDINK_HARNESS_PORT;
         } else {
-          process.env.HIDDINK_AGENT_PORT = origPort;
+          process.env.HIDDINK_HARNESS_PORT = origPort;
         }
       }
     });
@@ -121,7 +121,7 @@ describe('web-commands.ts', () => {
     it('should print "not running" message when no PID file exists', async () => {
       await webStopCommand();
 
-      const logOutput = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const logOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(logOutput).toContain('not running');
     });
   });
@@ -137,9 +137,9 @@ describe('web-commands.ts', () => {
       });
 
       try {
-        await expect(webOpenCommand({ port: 'not-a-port' })).rejects.toThrow('process.exit called');
+        expect(webOpenCommand({ port: 'not-a-port' })).rejects.toThrow('process.exit called');
 
-        const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(errorOutput).toContain('not-a-port');
       } finally {
         processExitSpy.mockRestore();
@@ -152,9 +152,9 @@ describe('web-commands.ts', () => {
       });
 
       try {
-        await expect(webOpenCommand({ port: '99999' })).rejects.toThrow('process.exit called');
+        expect(webOpenCommand({ port: '99999' })).rejects.toThrow('process.exit called');
 
-        const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
         expect(errorOutput).toContain('99999');
       } finally {
         processExitSpy.mockRestore();
@@ -167,7 +167,7 @@ describe('web-commands.ts', () => {
       });
 
       try {
-        await expect(webOpenCommand({ port: '0' })).rejects.toThrow('process.exit called');
+        expect(webOpenCommand({ port: '0' })).rejects.toThrow('process.exit called');
       } finally {
         processExitSpy.mockRestore();
       }
@@ -177,7 +177,7 @@ describe('web-commands.ts', () => {
       // No PID file → not running
       await webOpenCommand({ port: '4321' });
 
-      const warnOutput = consoleWarnSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const warnOutput = consoleWarnSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(warnOutput).toContain('not');
     });
 
@@ -191,11 +191,11 @@ describe('web-commands.ts', () => {
 
     it('should use DEFAULT_PORT (4321) when no port option is provided', async () => {
       // Should not throw for a valid default port
-      await expect(webOpenCommand({})).resolves.toBeUndefined();
+      expect(webOpenCommand({})).resolves.toBeUndefined();
     });
 
     it('should accept valid port in range (1–65535)', async () => {
-      await expect(webOpenCommand({ port: '8080' })).resolves.toBeUndefined();
+      expect(webOpenCommand({ port: '8080' })).resolves.toBeUndefined();
     });
   });
 
@@ -211,7 +211,7 @@ describe('web-commands.ts', () => {
       });
 
       try {
-        await expect(webStartCommand({ port: '4321', _projectRoot: emptyTempDir })).rejects.toThrow(
+        expect(webStartCommand({ port: '4321', _projectRoot: emptyTempDir })).rejects.toThrow(
           'process.exit called'
         );
       } finally {
@@ -230,7 +230,7 @@ describe('web-commands.ts', () => {
         processExitSpy.mockRestore();
       }
 
-      const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(errorOutput).toContain('Failed');
     });
 
@@ -246,7 +246,7 @@ describe('web-commands.ts', () => {
       }
 
       // serveCommand reports the error — verifies the delegation path ran
-      const errorOutput = consoleErrorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
       expect(errorOutput.length).toBeGreaterThan(0);
     });
   });

@@ -14,15 +14,15 @@ import {
 
 // Define DB path fallback chain:
 // 1. HIDDINK_MEMORY_DB env
-// 2. HIDDINK_AGENT_MEMORY_DB env
+// 2. HIDDINK_HARNESS_MEMORY_DB env
 // 3. ~/.hiddink-harness/memory.db
 // 4. ~/.hiddink-harness/memory.db
 function resolveDbPath(): string {
   if (process.env.HIDDINK_MEMORY_DB) {
     return process.env.HIDDINK_MEMORY_DB;
   }
-  if (process.env.HIDDINK_AGENT_MEMORY_DB) {
-    return process.env.HIDDINK_AGENT_MEMORY_DB;
+  if (process.env.HIDDINK_HARNESS_MEMORY_DB) {
+    return process.env.HIDDINK_HARNESS_MEMORY_DB;
   }
 
   // Default directories

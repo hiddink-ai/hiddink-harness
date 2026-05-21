@@ -56,7 +56,7 @@ export function isTempPath(projectPath: string): boolean {
 function registryDir(): string {
   if (_registryDirOverride !== undefined) return _registryDirOverride;
   // #859: subprocess test isolation via env var
-  const envOverride = process.env.HIDDINK_AGENT_REGISTRY_DIR;
+  const envOverride = process.env.HIDDINK_HARNESS_REGISTRY_DIR;
   if (envOverride) return envOverride;
   // Use process.env.HOME when available so tests can redirect to a temp directory
   // (Bun's os.homedir() caches the value and ignores runtime HOME changes).
@@ -147,7 +147,7 @@ export async function registerProject(projectPath: string, version: string): Pro
   const normalizedPath = resolve(projectPath);
 
   // #859: reject temp paths unless test isolation is active
-  if (!process.env.HIDDINK_AGENT_REGISTRY_DIR && _registryDirOverride === undefined) {
+  if (!process.env.HIDDINK_HARNESS_REGISTRY_DIR && _registryDirOverride === undefined) {
     if (isTempPath(normalizedPath)) return;
   }
 
@@ -193,7 +193,7 @@ export async function cleanRegistry(): Promise<number> {
 
   // Only purge temp paths when running in production (not test isolation mode)
   const purgeTempPaths =
-    !process.env.HIDDINK_AGENT_REGISTRY_DIR && _registryDirOverride === undefined;
+    !process.env.HIDDINK_HARNESS_REGISTRY_DIR && _registryDirOverride === undefined;
 
   for (const projectPath of paths) {
     // #859: drop temp paths that slipped in via pre-0.88.0 writes

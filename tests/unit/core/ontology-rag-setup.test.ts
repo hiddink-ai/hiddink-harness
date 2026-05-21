@@ -14,6 +14,7 @@ import {
 } from '../../../src/core/ontology-rag-setup.js';
 import * as fsUtils from '../../../src/utils/fs.js';
 
+
 describe('ontology-rag-setup', () => {
   let tempDir: string;
   let execSyncSpy: ReturnType<typeof spyOn>;
@@ -63,8 +64,8 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('checkPython3', () => {
     it('returns available=true and versionOk=true for Python 3.12', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() =>
-        Buffer.from('Python 3.12.0')
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => 'Python 3.12.0') as any
       );
 
       const result = checkPython3();
@@ -75,8 +76,8 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns versionOk=true for Python 3.10 (minimum)', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() =>
-        Buffer.from('Python 3.10.1')
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => 'Python 3.10.1') as any
       );
 
       const result = checkPython3();
@@ -86,8 +87,8 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns versionOk=false for Python 3.9 (below minimum)', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() =>
-        Buffer.from('Python 3.9.7')
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => 'Python 3.9.7') as any
       );
 
       const result = checkPython3();
@@ -110,8 +111,8 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns versionOk=false when version output cannot be parsed', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() =>
-        Buffer.from('something unexpected')
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => 'something unexpected') as any
       );
 
       const result = checkPython3();
@@ -126,7 +127,9 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('checkUvAvailableForSetup', () => {
     it('returns true when uv is installed', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       expect(checkUvAvailableForSetup()).toBe(true);
       expect(execSyncSpy).toHaveBeenCalledWith('uv --version', { stdio: 'pipe', timeout: 3000 });
     });
@@ -144,7 +147,9 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('createVenvWithUv', () => {
     it('calls uv venv with --python 3.12 in targetDir', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       createVenvWithUv(tempDir);
       expect(execSyncSpy).toHaveBeenCalledWith('uv venv --python 3.12 .venv', {
         cwd: tempDir,
@@ -166,7 +171,9 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('createVenvWithPython3', () => {
     it('calls python3 -m venv .venv in targetDir', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       createVenvWithPython3(tempDir);
       expect(execSyncSpy).toHaveBeenCalledWith('python3 -m venv .venv', {
         cwd: tempDir,
@@ -188,7 +195,9 @@ describe('ontology-rag-setup', () => {
   // ---------------------------------------------------------------------------
   describe('installOntologyRagEditable', () => {
     it('uses uv pip install when useUv=true', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       installOntologyRagEditable(tempDir, true);
       const call = String(execSyncSpy.mock.calls[0]?.[0] ?? '');
       expect(call).toContain('uv pip install');
@@ -197,7 +206,9 @@ describe('ontology-rag-setup', () => {
     });
 
     it('uses .venv/bin/pip when useUv=false', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       installOntologyRagEditable(tempDir, false);
       const call = String(execSyncSpy.mock.calls[0]?.[0] ?? '');
       expect(call).toContain('.venv/bin/pip install');
@@ -205,7 +216,9 @@ describe('ontology-rag-setup', () => {
     });
 
     it('uses editable install flag -e', () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       installOntologyRagEditable(tempDir, true);
       const call = String(execSyncSpy.mock.calls[0]?.[0] ?? '');
       expect(call).toContain(' -e ');
@@ -224,12 +237,14 @@ describe('ontology-rag-setup', () => {
       await mkdir(venvBin, { recursive: true });
       await writeFile(join(venvBin, 'python'), '#!/usr/bin/env python3\n');
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => '') as any
+      );
       // Default python version mock: 3.12
-      execSyncSpy.mockImplementation((cmd: unknown) => {
-        if (String(cmd).includes('python3 --version')) return Buffer.from('Python 3.12.0');
-        return Buffer.from('');
-      });
+      execSyncSpy.mockImplementation(((cmd: unknown) => {
+        if (String(cmd).includes('python3 --version')) return 'Python 3.12.0';
+        return '';
+      }) as any);
     }
 
     it('returns success=true when all steps succeed', async () => {
@@ -251,10 +266,10 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns success=false with clear reason when python3 is not found', async () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
         if (String(cmd).includes('python3 --version')) throw new Error('python3: not found');
-        return Buffer.from('');
-      });
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -265,10 +280,10 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns success=false with version message when python3 < 3.10', async () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
-        if (String(cmd).includes('python3 --version')) return Buffer.from('Python 3.9.0');
-        return Buffer.from('');
-      });
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
+        if (String(cmd).includes('python3 --version')) return 'Python 3.9.0';
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -283,13 +298,13 @@ describe('ontology-rag-setup', () => {
       await writeFile(join(venvBin, 'python'), '#!/usr/bin/env python3\n');
 
       const execCalls: string[] = [];
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
         const cmdStr = String(cmd);
         execCalls.push(cmdStr);
-        if (cmdStr.includes('python3 --version')) return Buffer.from('Python 3.12.0');
+        if (cmdStr.includes('python3 --version')) return 'Python 3.12.0';
         if (cmdStr.includes('uv --version')) throw new Error('uv: not found');
-        return Buffer.from('');
-      });
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -302,12 +317,12 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns success=false when venv creation fails', async () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
         const cmdStr = String(cmd);
-        if (cmdStr.includes('python3 --version')) return Buffer.from('Python 3.12.0');
+        if (cmdStr.includes('python3 --version')) return 'Python 3.12.0';
         if (cmdStr.includes('venv')) throw new Error('disk full');
-        return Buffer.from('');
-      });
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -317,12 +332,12 @@ describe('ontology-rag-setup', () => {
     });
 
     it('returns success=false when package install fails', async () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
         const cmdStr = String(cmd);
-        if (cmdStr.includes('python3 --version')) return Buffer.from('Python 3.12.0');
+        if (cmdStr.includes('python3 --version')) return 'Python 3.12.0';
         if (cmdStr.includes('pip install')) throw new Error('package not found');
-        return Buffer.from('');
-      });
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -333,10 +348,10 @@ describe('ontology-rag-setup', () => {
 
     it('returns success=false when .venv/bin/python is missing post-install', async () => {
       // Do NOT create .venv/bin/python
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
-        if (String(cmd).includes('python3 --version')) return Buffer.from('Python 3.12.0');
-        return Buffer.from('');
-      });
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
+        if (String(cmd).includes('python3 --version')) return 'Python 3.12.0';
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -345,11 +360,11 @@ describe('ontology-rag-setup', () => {
     });
 
     it('never throws — non-Error exceptions are handled gracefully', async () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
-        if (String(cmd).includes('python3 --version')) return Buffer.from('Python 3.12.0');
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
+        if (String(cmd).includes('python3 --version')) return 'Python 3.12.0';
         if (String(cmd).includes('venv')) throw 'some string error';
-        return Buffer.from('');
-      });
+        return '';
+      }) as any);
 
       // Must not throw
       const result = await setupOntologyRag(tempDir);
@@ -367,10 +382,10 @@ describe('ontology-rag-setup', () => {
         }
       );
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
-        if (String(cmd).includes('python3 --version')) return Buffer.from('Python 3.12.0');
-        return Buffer.from('');
-      });
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
+        if (String(cmd).includes('python3 --version')) return 'Python 3.12.0';
+        return '';
+      }) as any);
 
       const result = await setupOntologyRag(tempDir);
 
@@ -381,15 +396,15 @@ describe('ontology-rag-setup', () => {
     });
 
     // -----------------------------------------------------------------------
-    // HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP env-var fast-skip
+    // HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP env-var fast-skip
     // -----------------------------------------------------------------------
-    describe('HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP env var', () => {
+    describe('HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP env var', () => {
       afterEach(() => {
-        delete process.env.HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP;
+        delete process.env.HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP;
       });
 
       it('returns success=false and skips all subprocess calls when env var is set', async () => {
-        process.env.HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP = '1';
+        process.env.HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP = '1';
         // execSync should never be called
         execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => {
           throw new Error('execSync must not be called when skip env var is set');
@@ -398,18 +413,18 @@ describe('ontology-rag-setup', () => {
         const result = await setupOntologyRag(tempDir);
 
         expect(result.success).toBe(false);
-        expect(result.statusLine).toContain('HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP');
+        expect(result.statusLine).toContain('HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP');
         expect(result.reason).toBe('skipped via env var');
         expect(execSyncSpy).not.toHaveBeenCalled();
       });
 
       it('does not skip when env var is not set', async () => {
-        delete process.env.HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP;
+        delete process.env.HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP;
         // Just confirm execution proceeds normally (python3 not found path)
-        execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
+        execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
           if (String(cmd).includes('python3 --version')) throw new Error('python3: not found');
-          return Buffer.from('');
-        });
+          return '';
+        }) as any);
 
         const result = await setupOntologyRag(tempDir);
 
@@ -419,17 +434,17 @@ describe('ontology-rag-setup', () => {
       });
 
       it('does not skip when env var is set to non-"1" value', async () => {
-        process.env.HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP = 'true';
-        execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd: unknown) => {
+        process.env.HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP = 'true';
+        execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
           if (String(cmd).includes('python3 --version')) throw new Error('python3: not found');
-          return Buffer.from('');
-        });
+          return '';
+        }) as any);
 
         const result = await setupOntologyRag(tempDir);
 
         // env var='true' does NOT trigger the skip (only '1' does)
         expect(execSyncSpy).toHaveBeenCalled();
-        expect(result.statusLine).not.toContain('HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP');
+        expect(result.statusLine).not.toContain('HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP');
       });
     });
   });

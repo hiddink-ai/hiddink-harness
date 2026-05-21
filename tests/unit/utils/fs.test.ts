@@ -718,7 +718,7 @@ describe('fs utilities', () => {
       expect(typeof root).toBe('string');
       // Should be an absolute path
       expect(root.startsWith('/')).toBe(true);
-      // Should contain hiddink-harness or hiddink-agent in the path depending on workspace folder name
+      // Should contain hiddink-harness in the path (hiddink-agent accepted for legacy workspace folder names)
       expect(root).toMatch(/hiddink-(agent|harness)/);
     });
   });

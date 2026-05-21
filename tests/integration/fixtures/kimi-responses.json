@@ -1,0 +1,18 @@
+[
+  {
+    "description": "Session init event — same shape as Claude, resolves session ID",
+    "event": { "type": "system", "subtype": "init", "session_id": "kimi-int-session-001" }
+  },
+  {
+    "description": "Text delta — normalised to NormalizedMessage{role:'assistant', content:[{type:'text'}]}",
+    "event": { "type": "delta", "content": "안녕, Kimi입니다!", "index": 0 }
+  },
+  {
+    "description": "Tool call — normalised to NormalizedMessage{role:'tool', content:[{type:'tool_use'}]}",
+    "event": { "type": "tool_call", "id": "kimi_tool_01", "name": "bash", "input": { "command": "ls" } }
+  },
+  {
+    "description": "Done marker — discarded by KimiAdapter",
+    "event": { "type": "done" }
+  }
+]

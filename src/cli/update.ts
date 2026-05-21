@@ -94,7 +94,7 @@ type SpawnSyncFn = (
 ) => { status: number | null; signal: NodeJS.Signals | null };
 
 /**
- * Re-exec the current process with HIDDINK_AGENT_SKIP_SELF_UPDATE=true so the child
+ * Re-exec the current process with HIDDINK_HARNESS_SKIP_SELF_UPDATE=true so the child
  * process loads the newly-installed package version. Without this, the running
  * process retains stale top-level imports and downstream project updates fail
  * with "Downgrade prevented" (#860).
@@ -111,7 +111,7 @@ async function reexecUpdatedCli(toVersion: string, spawnFn?: SpawnSyncFn): Promi
   const { spawnSync } = await import('node:child_process');
   const child = (spawnFn ?? spawnSync)(process.execPath, [cliEntry, ...process.argv.slice(2)], {
     stdio: 'inherit',
-    env: { ...process.env, HIDDINK_AGENT_SKIP_SELF_UPDATE: 'true' },
+    env: { ...process.env, HIDDINK_HARNESS_SKIP_SELF_UPDATE: 'true' },
   });
   exitWithChildStatus(child); // helper added in D3
 }
@@ -133,7 +133,7 @@ async function handleSelfUpdate(spawnFn?: SpawnSyncFn): Promise<void> {
           to: selfUpdateResult.toVersion,
         })
       );
-      if (process.env.HIDDINK_AGENT_SKIP_SELF_UPDATE !== 'true') {
+      if (process.env.HIDDINK_HARNESS_SKIP_SELF_UPDATE !== 'true') {
         await reexecUpdatedCli(selfUpdateResult.toVersion, spawnFn);
       }
     }

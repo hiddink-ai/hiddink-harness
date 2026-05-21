@@ -4,6 +4,8 @@ import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { getGlobalStateDir, getProjectId, getProjectStateDir } from '../../core/global-state.js';
+import { ConversationHub } from '../../core/hub.js';
+import { ChatPanel } from './ChatPanel.js';
 
 interface DashboardProps {
   cwd: string;
@@ -25,7 +27,16 @@ interface LogEntry {
 
 export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
   const [projectId] = useState(() => getProjectId(cwd));
-  const [activeTab, setActiveTab] = useState<'sessions' | 'rag' | 'settings'>('sessions');
+  const [activeTab, setActiveTab] = useState<'sessions' | 'rag' | 'settings' | 'talk'>('sessions');
+
+  // ConversationHub 인스턴스 — 컴포넌트 lifetime과 동일하게 유지
+  const [hub] = useState(
+    () =>
+      new ConversationHub({
+        sessionId: `tui-${Date.now()}`,
+        cwd,
+      })
+  );
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeProviders, setActiveProviders] = useState<string[]>([]);
   const [language, setLanguage] = useState<string>('en');
@@ -87,6 +98,12 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
   // 1. 단축키 입력 리스너
   useInput((input, key) => {
     const char = input.toLowerCase();
+    // [T] Talk 탭에서는 숫자키가 ChatPanel provider 전환에 사용되므로
+    // 탭 전환 단축키(s/r/c/t)만 최상위에서 처리
+    if (activeTab === 'talk' && !['s', 'r', 'c', 'q'].includes(char) && !key.escape) {
+      // Talk 탭 내부에서는 ChatPanel이 키 이벤트를 처리
+      return;
+    }
     if (char === 's') {
       setActiveTab('sessions');
       addLog('탭 전환: [Sessions]');
@@ -96,11 +113,32 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
     } else if (char === 'c') {
       setActiveTab('settings');
       addLog('탭 전환: [Configuration]');
+    } else if (char === 't') {
+      setActiveTab('talk');
+      addLog('탭 전환: [Talk]');
     } else if (key.escape || char === 'q') {
       // 탈출(q 또는 ESC) 시 프로세스를 정상 종료하여 클린업 루틴 작동을 트리거합니다.
       process.exit(0);
     }
   });
+
+  // Hub adapter 등록 — binary 부재 시 graceful degradation (catch 무시)
+  useEffect(() => {
+    import('../../core/providers/claude-adapter.js')
+      .then((m) => hub.registerAdapter(new m.ClaudeAdapter()))
+      .catch(() => {});
+    import('../../core/providers/codex-adapter.js')
+      .then((m) => hub.registerAdapter(new m.CodexAdapter()))
+      .catch(() => {});
+    // kimi-adapter는 아직 구현 중 — binary 부재 시 graceful degradation
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic import of not-yet-existing module
+    (import('../../core/providers/kimi-adapter.js') as Promise<any>)
+      .then((m) => hub.registerAdapter(new m.KimiAdapter()))
+      .catch(() => {});
+    return () => {
+      hub.close().catch(() => {});
+    };
+  }, [hub]);
 
   // 2. 초기 렌더링 및 실시간 동기화
   useEffect(() => {
@@ -164,27 +202,34 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
             {' [R] RAG Knowledge '}
           </Text>
         </Box>
-        <Box>
+        <Box marginRight={2}>
           <Text inverse={activeTab === 'settings'} color="blue" bold={activeTab === 'settings'}>
             {' [C] Configurations '}
+          </Text>
+        </Box>
+        <Box>
+          <Text inverse={activeTab === 'talk'} color="green" bold={activeTab === 'talk'}>
+            {' [T] Talk '}
           </Text>
         </Box>
       </Box>
 
       {/* 3. 메인 디스플레이 박스 */}
       <Box
-        height={11}
+        height={activeTab === 'talk' ? 22 : 11}
         flexDirection="column"
         borderStyle="round"
-        borderColor="gray"
+        borderColor={activeTab === 'talk' ? 'green' : 'gray'}
         paddingLeft={1}
         paddingRight={1}
       >
         {activeTab === 'sessions' && (
           <Box flexDirection="column">
-            <Text bold color="yellow" marginBottom={1}>
-              📝 실시간 활성 대화 스레드 ({sessions.length}개)
-            </Text>
+            <Box marginBottom={1}>
+              <Text bold color="yellow">
+                📝 실시간 활성 대화 스레드 ({sessions.length}개)
+              </Text>
+            </Box>
             {sessions.length === 0 ? (
               <Text color="gray">
                 활성화된 대화 세션이 없습니다. 에이전트를 구동해 대화를 시작해 보세요!
@@ -213,9 +258,11 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
 
         {activeTab === 'rag' && (
           <Box flexDirection="column">
-            <Text bold color="magenta" marginBottom={1}>
-              🧠 로컬 RAG 지식 & 피드백 저장소
-            </Text>
+            <Box marginBottom={1}>
+              <Text bold color="magenta">
+                🧠 로컬 RAG 지식 & 피드백 저장소
+              </Text>
+            </Box>
             <Text color="brightWhite">
               데이터베이스 경로: ~/.hiddink-harness/projects/{projectId}/memory.db
             </Text>
@@ -227,11 +274,15 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
           </Box>
         )}
 
+        {activeTab === 'talk' && <ChatPanel hub={hub} cwd={cwd} />}
+
         {activeTab === 'settings' && (
           <Box flexDirection="column">
-            <Text bold color="blue" marginBottom={1}>
-              🔧 Hiddink 가상 프로젝트 설정 (.hiddinkrc.json)
-            </Text>
+            <Box marginBottom={1}>
+              <Text bold color="blue">
+                🔧 Hiddink 가상 프로젝트 설정 (.hiddinkrc.json)
+              </Text>
+            </Box>
             <Text>
               • 기본 언어:{' '}
               <Text color="yellow" bold>
@@ -241,9 +292,11 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
             <Text>
               • 활성 에이전트 서비스: <Text color="green">{activeProviders.join(', ')}</Text>
             </Text>
-            <Text color="gray" marginTop={1}>
-              * 가상 폴더는 ~/.hiddink-harness/projects/ 에 격리되어 있습니다.
-            </Text>
+            <Box marginTop={1}>
+              <Text color="gray">
+                * 가상 폴더는 ~/.hiddink-harness/projects/ 에 격리되어 있습니다.
+              </Text>
+            </Box>
           </Box>
         )}
       </Box>
@@ -266,7 +319,7 @@ export const HiddinkTuiDashboard: React.FC<DashboardProps> = ({ cwd }) => {
 
       {/* 5. 하단 안내 바 */}
       <Box marginTop={1} justifyContent="space-between" borderStyle="single" borderColor="green">
-        <Text color="gray">단축키: [S]세션 [R]지식 [C]설정</Text>
+        <Text color="gray">단축키: [S]세션 [R]지식 [C]설정 [T]대화</Text>
         <Text color="brightRed" bold>
           종료 및 흔적 지우기: [Q] 또는 [ESC]
         </Text>

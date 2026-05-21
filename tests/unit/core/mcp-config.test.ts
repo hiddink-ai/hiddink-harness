@@ -8,6 +8,9 @@ import * as fsUtils from '../../../src/utils/fs.js';
 
 const { fileExists } = fsUtils;
 
+// Alias for casting execSync mock implementations to satisfy TypeScript's overloaded type.
+type ExecSyncFn = typeof childProcess.execSync;
+
 describe('mcp-config', () => {
   let tempDir: string;
   let execSyncSpy: ReturnType<typeof spyOn>;
@@ -38,7 +41,9 @@ describe('mcp-config', () => {
 
   describe('checkUvAvailable', () => {
     it('should return true when uv is available', async () => {
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       const result = await checkUvAvailable();
 
@@ -109,10 +114,10 @@ describe('mcp-config', () => {
       await mkdir(ontologyDir, { recursive: true });
 
       const execCalls: string[] = [];
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(((cmd: unknown) => {
         execCalls.push(String(cmd));
         return Buffer.from('');
-      });
+      }) as unknown as ExecSyncFn);
 
       await generateMCPConfig(tempDir);
 
@@ -138,7 +143,9 @@ describe('mcp-config', () => {
       };
       await writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2));
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 
@@ -168,7 +175,9 @@ describe('mcp-config', () => {
       };
       await writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2));
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 
@@ -189,7 +198,9 @@ describe('mcp-config', () => {
       const mcpConfigPath = join(tempDir, '.mcp.json');
       await writeFile(mcpConfigPath, '{ invalid json }');
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 
@@ -205,7 +216,9 @@ describe('mcp-config', () => {
       const ontologyDir = join(tempDir, '.claude', 'ontology');
       await mkdir(ontologyDir, { recursive: true });
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 
@@ -224,7 +237,9 @@ describe('mcp-config', () => {
       const ontologyDir = join(tempDir, '.claude', 'ontology');
       await mkdir(ontologyDir, { recursive: true });
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 
@@ -249,7 +264,9 @@ describe('mcp-config', () => {
       };
       await writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2));
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 
@@ -272,7 +289,9 @@ describe('mcp-config', () => {
       };
       await writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2));
 
-      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(() => Buffer.from(''));
+      execSyncSpy = spyOn(childProcess, 'execSync').mockImplementation(
+        (() => Buffer.from('')) as unknown as ExecSyncFn
+      );
 
       await generateMCPConfig(tempDir);
 

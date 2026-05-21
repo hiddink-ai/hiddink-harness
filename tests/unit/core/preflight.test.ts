@@ -15,7 +15,7 @@ describe('preflight', () => {
     process.env = { ...originalEnv };
     delete process.env.CI;
     delete process.env.GITHUB_ACTIONS;
-    delete process.env.HIDDINK_AGENT_SKIP_PREFLIGHT;
+    delete process.env.HIDDINK_HARNESS_SKIP_PREFLIGHT;
   });
 
   describe('isCI', () => {
@@ -29,8 +29,8 @@ describe('preflight', () => {
       expect(isCI()).toBe(true);
     });
 
-    it('should return true when HIDDINK_AGENT_SKIP_PREFLIGHT env var is set', () => {
-      process.env.HIDDINK_AGENT_SKIP_PREFLIGHT = 'true';
+    it('should return true when HIDDINK_HARNESS_SKIP_PREFLIGHT env var is set', () => {
+      process.env.HIDDINK_HARNESS_SKIP_PREFLIGHT = 'true';
       expect(isCI()).toBe(true);
     });
 

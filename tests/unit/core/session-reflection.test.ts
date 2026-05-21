@@ -7,7 +7,7 @@
  * - Immediately echoes stdin back to stdout (pass-through) and exits 0
  *
  * Test strategy:
- * - Use HIDDINK_AGENT_TRANSCRIPT_BASE + HIDDINK_AGENT_PROJECT_ROOT env-overrides to
+ * - Use HIDDINK_HARNESS_TRANSCRIPT_BASE + HIDDINK_HARNESS_PROJECT_ROOT env-overrides to
  *   isolate every test in a temporary directory (no global state).
  * - Run the script directly against the templates/ canonical copy.
  * - Poll the reflection log after a short delay to verify background output.
@@ -17,7 +17,7 @@
  * 1. Clean transcript       → log emitted, R007=0 R008=0
  * 2. R007 violation         → R007 count ≥ 1, sample line in log
  * 3. R008 violation         → R008 count ≥ 1, sample line in log
- * 4. HIDDINK_AGENT_SESSION_REFLECTION=off → analysis skipped, no log file
+ * 4. HIDDINK_HARNESS_SESSION_REFLECTION=off → analysis skipped, no log file
  * 5. Sample cap             → ≤ 3 sample entries even with 5 violations
  */
 
@@ -123,8 +123,8 @@ async function writeTranscript(sessionId: string, lines: string[]): Promise<stri
 /** Common env overrides for an isolated test run. */
 function testEnv(): Record<string, string> {
   return {
-    HIDDINK_AGENT_TRANSCRIPT_BASE: transcriptDir,
-    HIDDINK_AGENT_PROJECT_ROOT: tmpRoot,
+    HIDDINK_HARNESS_TRANSCRIPT_BASE: transcriptDir,
+    HIDDINK_HARNESS_PROJECT_ROOT: tmpRoot,
   };
 }
 
@@ -314,7 +314,7 @@ describe('session-reflection.sh — Fixture 3: R008 violation', () => {
 // ════════════════════════════════════════════════════════════════
 
 describe('session-reflection.sh — Fixture 4: opt-out', () => {
-  it('skips analysis when HIDDINK_AGENT_SESSION_REFLECTION=off', async () => {
+  it('skips analysis when HIDDINK_HARNESS_SESSION_REFLECTION=off', async () => {
     const sid = `opt-out-${Date.now()}`;
     // create transcript so the only skip reason is the env var
     await writeTranscript(sid, [
@@ -326,7 +326,7 @@ describe('session-reflection.sh — Fixture 4: opt-out', () => {
 
     await runScript(stopInput(sid), {
       ...testEnv(),
-      HIDDINK_AGENT_SESSION_REFLECTION: 'off',
+      HIDDINK_HARNESS_SESSION_REFLECTION: 'off',
     });
 
     // give a moment to confirm nothing is written
@@ -338,7 +338,7 @@ describe('session-reflection.sh — Fixture 4: opt-out', () => {
     const input = stopInput('opt-out-pass');
     const r = await runScript(input, {
       ...testEnv(),
-      HIDDINK_AGENT_SESSION_REFLECTION: 'off',
+      HIDDINK_HARNESS_SESSION_REFLECTION: 'off',
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe(input);

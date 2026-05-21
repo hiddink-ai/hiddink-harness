@@ -32,7 +32,7 @@ export async function webStopCommand(): Promise<void> {
 export async function webStatusCommand(): Promise<void> {
   const running = await isServeRunning();
   if (running) {
-    const port = process.env.HIDDINK_AGENT_PORT ?? String(DEFAULT_PORT);
+    const port = process.env.HIDDINK_HARNESS_PORT ?? String(DEFAULT_PORT);
     console.log(i18n.t('cli.web.status.running', { port }));
   } else {
     console.log(i18n.t('cli.web.status.notRunning'));

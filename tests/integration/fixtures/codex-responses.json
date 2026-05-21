@@ -1,0 +1,28 @@
+[
+  {
+    "description": "Thread started — captured as session.id by CodexSession; not yielded as NormalizedMessage",
+    "event": { "type": "thread.started", "thread_id": "codex-thread-int-001" }
+  },
+  {
+    "description": "Turn started — informational only, not yielded",
+    "event": { "type": "turn.started" }
+  },
+  {
+    "description": "Agent message completed — normalised to NormalizedMessage{role:'assistant', content:[{type:'text'}]}",
+    "event": {
+      "type": "item.completed",
+      "item": { "type": "agent_message", "text": "Codex 응답입니다." }
+    }
+  },
+  {
+    "description": "Turn completed — yields NormalizedMessage{role:'system', content:''} with usage providerMeta",
+    "event": {
+      "type": "turn.completed",
+      "usage": { "input_tokens": 12, "output_tokens": 34, "total_tokens": 46 }
+    }
+  },
+  {
+    "description": "Resume call args: codex exec resume <thread_id> '<prompt>' --json --sandbox workspace-write --ask-for-approval never",
+    "note": "Second-turn command uses thread_id from thread.started event as positional argument"
+  }
+]

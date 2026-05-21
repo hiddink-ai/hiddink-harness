@@ -47,8 +47,8 @@ describe('E2E: hiddink-harness list', () => {
       stderr: 'pipe',
       env: {
         ...process.env,
-        HIDDINK_AGENT_REGISTRY_DIR: join(tempDir, '.hiddink-harness-registry'),
-        HIDDINK_AGENT_SKIP_ONTOLOGY_RAG_SETUP: '1',
+        HIDDINK_HARNESS_REGISTRY_DIR: join(tempDir, '.hiddink-harness-registry'),
+        HIDDINK_HARNESS_SKIP_ONTOLOGY_RAG_SETUP: '1',
       },
     });
 

@@ -1,7 +1,7 @@
 /**
  * MemoryMcpServer — wraps MemoryService as an MCP server.
  *
- * Reads the SQLite DB path from HIDDINK_AGENT_MEMORY_DB env var or
+ * Reads the SQLite DB path from HIDDINK_HARNESS_MEMORY_DB env var or
  * falls back to ~/.hiddink-harness/memory.db.
  *
  * Exposed tools:
@@ -107,14 +107,14 @@ const TOOL_STATS = {
 // ---------------------------------------------------------------------------
 
 export interface MemoryMcpServerOptions {
-  /** Override DB path (default: HIDDINK_AGENT_MEMORY_DB env or ~/.hiddink-harness/memory.db) */
+  /** Override DB path (default: HIDDINK_HARNESS_MEMORY_DB env or ~/.hiddink-harness/memory.db) */
   dbPath?: string;
 }
 
 export function createMemoryMcpServer(opts: MemoryMcpServerOptions = {}): Server {
   const dbPath =
     opts.dbPath ??
-    process.env['HIDDINK_AGENT_MEMORY_DB'] ??
+    process.env['HIDDINK_HARNESS_MEMORY_DB'] ??
     join(homedir(), '.hiddink-harness', 'memory.db');
 
   const db = createDb(dbPath);

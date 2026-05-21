@@ -1,6 +1,7 @@
 /**
  * Self-update check for hiddink-harness CLI
- * Runs before `hiddink-harness init` in interactive sessions.
+ * Runs before `hiddink-harness init` in interactive sessions,
+ * and as a non-blocking background check for all other commands.
  */
 
 import { execSync, spawnSync } from 'node:child_process';
@@ -26,6 +27,43 @@ export interface SelfUpdateCheckResult {
   latestVersion: string | null;
   usedCache: boolean;
   reason?: string;
+}
+
+/**
+ * Options for the non-blocking, non-interactive self-update check used by all
+ * commands except `init` (which has its own interactive prompt flow) and
+ * `serve`/`web` (fast server ops where latency matters).
+ */
+export interface CommandSelfUpdateOptions {
+  /** Current installed version (from package.json). */
+  currentVersion: string;
+  /** When true, skip the check entirely without any output. */
+  skip?: boolean;
+  /** When true, apply the update automatically without prompting. */
+  autoApply?: boolean;
+  /** Context hint for callers — affects stderr banner format. */
+  mode: 'tui' | 'subcommand';
+  // --- Injected dependencies (for testing) ---
+  packageName?: string;
+  cachePath?: string;
+  cacheTtlMs?: number;
+  fetchLatestVersion?: (packageName: string) => string | null;
+  now?: number;
+  argv?: string[];
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface CommandSelfUpdateResult {
+  /** True if an update was found (regardless of whether it was applied). */
+  updateAvailable: boolean;
+  /** The latest version string, or null if the check was skipped/failed. */
+  latestVersion: string | null;
+  /** True if `npm install -g` completed successfully. */
+  applied: boolean;
+  /** True if the check was skipped (via flag or environment). */
+  skipped: boolean;
+  /** Set when an unexpected error occurred (check failure is not an error). */
+  error?: string;
 }
 
 export interface SelfUpdateOptions {
@@ -217,7 +255,7 @@ function runNpxRelaunch(
     stdio: 'inherit',
     env: {
       ...env,
-      HIDDINK_AGENT_SKIP_SELF_UPDATE: 'true',
+      HIDDINK_HARNESS_SKIP_SELF_UPDATE: 'true',
     },
   });
 
@@ -269,10 +307,13 @@ export interface ExecuteSelfUpdateResult {
 
 /**
  * Returns true when the environment indicates self-update should be skipped.
+ * Supports both the current env var (HIDDINK_HARNESS_SKIP_SELF_UPDATE) and the
+ * legacy alias (HIDDINK_AGENT_SKIP_SELF_UPDATE) for backwards compatibility.
  */
 function shouldSkipEnvironmentUpdate(argv: string[], env: NodeJS.ProcessEnv): boolean {
   if (isNpxInvocation(argv, env)) return true;
   if (env.CI === 'true' || env.GITHUB_ACTIONS === 'true') return true;
+  if (env.HIDDINK_HARNESS_SKIP_SELF_UPDATE === 'true') return true;
   if (env.HIDDINK_AGENT_SKIP_SELF_UPDATE === 'true') return true;
   return false;
 }
@@ -443,7 +484,7 @@ function shouldSkipSelfUpdate(options: SelfUpdateOptions): boolean {
   if (argv.includes('--skip-version-check')) {
     return true;
   }
-  if (env.HIDDINK_AGENT_SKIP_SELF_UPDATE === 'true') {
+  if (env.HIDDINK_HARNESS_SKIP_SELF_UPDATE === 'true') {
     return true;
   }
   if (env.CI === 'true' || env.GITHUB_ACTIONS === 'true') {
@@ -453,6 +494,119 @@ function shouldSkipSelfUpdate(options: SelfUpdateOptions): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Non-blocking self-update check for all commands except `init`.
+ *
+ * - Uses the shared cache (24 h TTL) to avoid hammering npm registry.
+ * - When `autoApply=true`, runs `npm install -g hiddink-harness@latest` via
+ *   spawnSync and returns `{ applied: true }` so the caller can exit(0) and
+ *   ask the user to re-run.
+ * - When `autoApply=false`, returns the check result so the caller can print
+ *   a one-line stderr banner.
+ * - All network/install failures are silently swallowed — never throws.
+ */
+export async function maybeHandleSelfUpdateForCommand(
+  options: CommandSelfUpdateOptions
+): Promise<CommandSelfUpdateResult> {
+  const skipped: CommandSelfUpdateResult = {
+    updateAvailable: false,
+    latestVersion: null,
+    applied: false,
+    skipped: true,
+  };
+
+  const env = options.env ?? process.env;
+  const argv = options.argv ?? process.argv;
+
+  // --- Skip conditions ---
+  if (options.skip) {
+    return skipped;
+  }
+  if (argv.includes('--skip-self-update')) {
+    return skipped;
+  }
+  if (
+    env.HIDDINK_HARNESS_SKIP_SELF_UPDATE === '1' ||
+    env.HIDDINK_HARNESS_SKIP_SELF_UPDATE === 'true' ||
+    env.HIDDINK_AGENT_SKIP_SELF_UPDATE === 'true'
+  ) {
+    return skipped;
+  }
+  // npx always fetches latest itself — nothing to do
+  if (isNpxInvocation(argv, env)) {
+    return skipped;
+  }
+
+  const packageName = options.packageName ?? DEFAULT_PACKAGE_NAME;
+  const currentVersion = normalizeVersion(options.currentVersion);
+
+  if (!currentVersion) {
+    return skipped;
+  }
+
+  try {
+    const checkResult = checkSelfUpdate({
+      currentVersion,
+      packageName,
+      cachePath: options.cachePath,
+      cacheTtlMs: options.cacheTtlMs,
+      fetchLatestVersion: options.fetchLatestVersion,
+      now: options.now,
+      argv,
+      env,
+    });
+
+    if (!checkResult.checked || !checkResult.updateAvailable || !checkResult.latestVersion) {
+      return {
+        updateAvailable: false,
+        latestVersion: checkResult.latestVersion,
+        applied: false,
+        skipped: false,
+        reason: checkResult.reason,
+      } as CommandSelfUpdateResult & { reason?: string };
+    }
+
+    const latestVersion = checkResult.latestVersion;
+
+    if (!options.autoApply) {
+      return {
+        updateAvailable: true,
+        latestVersion,
+        applied: false,
+        skipped: false,
+      };
+    }
+
+    // Auto-apply: run npm install -g synchronously
+    const installResult = spawnSync('npm', ['install', '-g', `${packageName}@${latestVersion}`], {
+      stdio: 'pipe',
+      timeout: 60_000,
+      env: {
+        ...env,
+        // Prevent the newly installed binary from running another self-update
+        HIDDINK_HARNESS_SKIP_SELF_UPDATE: '1',
+      },
+    });
+
+    const applied = (installResult.status ?? 1) === 0;
+    return {
+      updateAvailable: true,
+      latestVersion,
+      applied,
+      skipped: false,
+    };
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    return {
+      updateAvailable: false,
+      latestVersion: null,
+      applied: false,
+      skipped: false,
+      error: errorMessage,
+    };
+  }
 }
 
 /**

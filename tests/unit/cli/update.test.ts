@@ -1660,7 +1660,7 @@ describe('update command', () => {
     beforeEach(() => {
       originalEnv = { ...process.env };
       // Ensure re-exec guard is NOT set by default
-      delete process.env.HIDDINK_AGENT_SKIP_SELF_UPDATE;
+      delete process.env.HIDDINK_HARNESS_SKIP_SELF_UPDATE;
     });
 
     afterEach(() => {
@@ -1712,14 +1712,14 @@ describe('update command', () => {
       expect(callArgs[0]).toBe(process.execPath);
       // Third argument is options — env should include the guard
       const spawnOptions = callArgs[2] as { env?: Record<string, string> };
-      expect(spawnOptions.env?.HIDDINK_AGENT_SKIP_SELF_UPDATE).toBe('true');
+      expect(spawnOptions.env?.HIDDINK_HARNESS_SKIP_SELF_UPDATE).toBe('true');
 
       // process.exit must have been called with child.status (0)
       expect(exitCode).toBe(0);
     });
 
-    it('should NOT call spawnSync when HIDDINK_AGENT_SKIP_SELF_UPDATE=true is set', async () => {
-      process.env.HIDDINK_AGENT_SKIP_SELF_UPDATE = 'true';
+    it('should NOT call spawnSync when HIDDINK_HARNESS_SKIP_SELF_UPDATE=true is set', async () => {
+      process.env.HIDDINK_HARNESS_SKIP_SELF_UPDATE = 'true';
 
       spawnSyncMock = mock(() => ({ status: 0, pid: 999 }));
 
@@ -2072,7 +2072,7 @@ describe('update command', () => {
 
     beforeEach(() => {
       originalEnv = { ...process.env };
-      delete process.env.HIDDINK_AGENT_SKIP_SELF_UPDATE;
+      delete process.env.HIDDINK_HARNESS_SKIP_SELF_UPDATE;
     });
 
     afterEach(() => {
