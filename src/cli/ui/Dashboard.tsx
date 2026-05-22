@@ -1,82 +1,166 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { Box, Text, useInput, useStdout } from 'ink';
+import { execFile } from 'node:child_process';
+import { Box, Text, useStdout } from 'ink';
 import type { FC, ReactNode } from 'react';
-import { memo, useCallback, useEffect, useState } from 'react';
-import { getProjectId, getProjectStateDir } from '../../core/global-state.js';
+import { useEffect, useState } from 'react';
 import { ConversationHub } from '../../core/hub.js';
-import { ChatPanel } from './ChatPanel.js';
+import { ChatPanel, DEFAULT_PROVIDER_MODELS } from './ChatPanel.js';
 
 interface DashboardProps {
   cwd: string;
 }
 
-// ---------------------------------------------------------------------------
-// Static header components — memoized so they never re-render during typing
-// ---------------------------------------------------------------------------
+interface TerminalSize {
+  columns: number;
+  rows: number;
+}
 
-const DashboardHeader = memo<{ cwd: string; projectId: string }>(({ cwd, projectId }) => (
-  <>
-    <Box justifyContent="space-between" marginBottom={1}>
-      <Text bold color="green">
-        ⚽ Hiddink Universal Agent Harness (TUI)
-      </Text>
-      <Text color="gray">PID: {process.pid}</Text>
-    </Box>
-    <Box justifyContent="space-between" marginBottom={1}>
-      <Text color="brightWhite" dimColor>
-        CWD: {cwd}
-      </Text>
-      <Text color="cyan" bold>
-        ID: {projectId}
-      </Text>
-    </Box>
-  </>
-));
-DashboardHeader.displayName = 'DashboardHeader';
+const GIT_GRAPH_MIN_COLUMNS = 100;
+const GIT_REFRESH_MS = 10_000;
 
-const ShortcutHint = memo(() => (
-  <Box marginBottom={1}>
-    <Text color="gray" dimColor>
-      * 슬래시 명령으로 전환: /sessions /rag /settings /talk · 종료: /exit · 이전 탭: ESC
-    </Text>
-  </Box>
-));
-ShortcutHint.displayName = 'ShortcutHint';
+interface GitGraphRow {
+  id: string;
+  graph: string;
+  text: string;
+}
 
-const BottomBar = memo(() => (
-  <Box marginTop={1}>
-    <Text color="gray">
-      명령: /sessions /rag /settings /talk · 종료: /exit · 비-Talk 탭에서 ESC로 복귀
-    </Text>
-  </Box>
-));
-BottomBar.displayName = 'BottomBar';
+interface GitPanelData {
+  status: string;
+  rows: GitGraphRow[];
+}
+
+export function inkSafeRows(rows: number): number {
+  // Ink falls back to ansiEscapes.clearTerminal when rendered output height is
+  // >= stdout.rows. Any height-aware side panels should stay below that line.
+  return Math.max(1, rows - 1);
+}
+
+export function shouldShowGitGraph(size: TerminalSize): boolean {
+  return size.columns >= GIT_GRAPH_MIN_COLUMNS;
+}
+
+export function gitGraphWidth(columns: number): number {
+  return Math.min(48, Math.max(32, Math.floor(columns * 0.35)));
+}
+
+function execGit(cwd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      args,
+      { cwd, encoding: 'utf8', maxBuffer: 200_000, timeout: 1500 },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(String(stdout));
+      }
+    );
+  });
+}
+
+export function graphGlyphs(graphText: string): string {
+  return graphText
+    .replace(/\*/g, '●')
+    .replace(/\|/g, '│')
+    .replace(/\//g, '╱')
+    .replace(/\\/g, '╲')
+    .replace(/_/g, '─')
+    .replace(/-/g, '─');
+}
+
+export function parseGitGraphLine(line: string): GitGraphRow {
+  const commitMatch = /^([*|\\/ _.-]*)([a-f0-9]{7,}\b.*)$/.exec(line);
+  if (commitMatch) {
+    const graph = graphGlyphs(commitMatch[1].trimEnd());
+    return {
+      id: `${graph}-${commitMatch[2]}`,
+      graph,
+      text: commitMatch[2],
+    };
+  }
+
+  const graphOnly = graphGlyphs(line.trimEnd());
+  return {
+    id: graphOnly,
+    graph: graphOnly,
+    text: '',
+  };
+}
+
+export async function readGitPanelData(cwd: string, maxRows: number): Promise<GitPanelData | null> {
+  try {
+    const inside = await execGit(cwd, ['rev-parse', '--is-inside-work-tree']);
+    if (inside.trim() !== 'true') return null;
+
+    const logLimit = Math.max(1, maxRows);
+    const [branchStdout, statusStdout, logStdout] = await Promise.all([
+      execGit(cwd, ['branch', '--show-current']),
+      execGit(cwd, ['status', '--short']),
+      execGit(cwd, [
+        '--no-pager',
+        'log',
+        '--graph',
+        '--decorate',
+        '--oneline',
+        '--all',
+        '--date-order',
+        '-n',
+        String(logLimit),
+      ]),
+    ]);
+
+    const branch = branchStdout.trim() || 'detached';
+    const changeCount = statusStdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean).length;
+    const status = ` ${branch}${changeCount > 0 ? ` · ${changeCount} changes` : ' · clean'}`;
+    const rows = logStdout
+      .split('\n')
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .map(parseGitGraphLine);
+
+    return { status, rows: rows.slice(0, maxRows) };
+  } catch {
+    return null;
+  }
+}
+
+export async function readGitPanelLines(cwd: string, maxLines: number): Promise<string[] | null> {
+  const panel = await readGitPanelData(cwd, Math.max(1, maxLines - 1));
+  if (!panel) return null;
+  return [panel.status, ...panel.rows.map((row) => `${row.graph} ${row.text}`.trimEnd())].slice(
+    0,
+    maxLines
+  );
+}
 
 // ---------------------------------------------------------------------------
 // FullScreenContainer — alternate screen buffer + terminal dimensions
 // ---------------------------------------------------------------------------
 
-const FullScreenContainer: FC<{ children: ReactNode }> = ({ children }) => {
+const FullScreenContainer: FC<{ children: (size: TerminalSize) => ReactNode }> = ({ children }) => {
   const { stdout } = useStdout();
   const [size, setSize] = useState(() => ({
     columns: stdout.columns ?? 80,
-    rows: stdout.rows ?? 24,
+    rows: inkSafeRows(stdout.rows ?? 24),
   }));
 
   useEffect(() => {
-    // Enter alternate screen buffer + clear + cursor home
-    stdout.write('\x1b[?1049h\x1b[2J\x1b[H');
-
     const handleResize = () => {
       setSize({
         columns: stdout.columns ?? 80,
-        rows: stdout.rows ?? 24,
+        rows: inkSafeRows(stdout.rows ?? 24),
       });
     };
     stdout.on('resize', handleResize);
 
+    let fullscreenExited = false;
     const exitFullscreen = () => {
+      if (fullscreenExited) return;
+      fullscreenExited = true;
       try {
         stdout.write('\x1b[?1049l');
       } catch {
@@ -102,111 +186,76 @@ const FullScreenContainer: FC<{ children: ReactNode }> = ({ children }) => {
 
   return (
     <Box width={size.columns} height={size.rows} flexDirection="column">
-      {children}
+      {children(size)}
     </Box>
   );
 };
 
-interface SessionMeta {
-  sessionId: string;
-  projectId: string;
-  projectPath: string;
-  createdAt: string;
-  updatedAt: string;
-  lastMessageSnippet?: string;
-}
+const GitGraphPanel: FC<{ cwd: string; width: number; maxLines: number }> = ({
+  cwd,
+  width,
+  maxLines,
+}) => {
+  const [panel, setPanel] = useState<GitPanelData | null>(null);
 
-interface LogEntry {
-  id: string;
-  text: string;
-}
+  useEffect(() => {
+    let cancelled = false;
 
-/** Sessions shallow equality — 동일 배열이면 리렌더링 억제 */
-function sessionsEqual(a: SessionMeta[], b: SessionMeta[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].sessionId !== b[i].sessionId || a[i].updatedAt !== b[i].updatedAt) return false;
-  }
-  return true;
-}
+    const refresh = async () => {
+      const nextPanel = await readGitPanelData(cwd, maxLines);
+      if (!cancelled) setPanel(nextPanel);
+    };
+
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, GIT_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [cwd, maxLines]);
+
+  if (!panel) return null;
+
+  const maxGraphWidth = Math.max(2, ...panel.rows.map((row) => Math.max(1, row.graph.length)));
+  const seenRows = new Map<string, number>();
+
+  return (
+    <Box borderColor="gray" borderStyle="round" flexDirection="column" paddingX={1} width={width}>
+      <Text color="yellow" bold>
+        Git graph
+      </Text>
+      <Text color="cyan" wrap="truncate">
+        {panel.status}
+      </Text>
+      {panel.rows.map((row) => {
+        const count = (seenRows.get(row.id) ?? 0) + 1;
+        seenRows.set(row.id, count);
+        return (
+          <Text key={`${row.id}-${count}`} wrap="truncate">
+            <Text color="green" bold>
+              {row.graph.padEnd(maxGraphWidth)}
+            </Text>
+            <Text color="gray"> {row.text}</Text>
+          </Text>
+        );
+      })}
+    </Box>
+  );
+};
 
 export const HiddinkTuiDashboard: FC<DashboardProps> = ({ cwd }) => {
-  const [projectId] = useState(() => getProjectId(cwd));
-  const [activeTab, setActiveTab] = useState<'sessions' | 'rag' | 'settings' | 'talk'>('talk');
-
-  // ConversationHub 인스턴스 — 컴포넌트 lifetime과 동일하게 유지
   const [hub] = useState(
     () =>
       new ConversationHub({
         sessionId: `tui-${Date.now()}`,
         cwd,
+        initialModels: DEFAULT_PROVIDER_MODELS,
       })
   );
-  const [sessions, setSessions] = useState<SessionMeta[]>([]);
-  const [activeProviders, setActiveProviders] = useState<string[]>([]);
-  const [language, setLanguage] = useState<string>('en');
-  const [systemLogs, setSystemLogs] = useState<LogEntry[]>([]);
 
-  // 시스템 로그 추가 헬퍼 (useCallback으로 메모이제이션)
-  const addLog = useCallback((msg: string) => {
-    const time = new Date().toLocaleTimeString();
-    const entry: LogEntry = {
-      id: `${Date.now()}-${Math.random()}`,
-      text: `[${time}] ${msg}`,
-    };
-    setSystemLogs((prev) => [...prev.slice(-4), entry]);
-  }, []);
-
-  // 세션 데이터 수집 및 정합 (useCallback으로 메모이제이션)
-  const syncSessions = useCallback(() => {
-    try {
-      const projectDir = getProjectStateDir(projectId);
-      const sessionsDir = join(projectDir, 'sessions');
-      if (!existsSync(sessionsDir)) return;
-
-      const files = readdirSync(sessionsDir).filter(
-        (f) => f.startsWith('session-') && f.endsWith('.json')
-      );
-      const list: SessionMeta[] = [];
-
-      for (const file of files) {
-        try {
-          const content = JSON.parse(readFileSync(join(sessionsDir, file), 'utf-8'));
-          const msgs = content.messages || [];
-          const lastMsg = msgs[msgs.length - 1];
-          list.push({
-            sessionId: content.sessionId,
-            projectId: content.projectId,
-            projectPath: content.projectPath,
-            createdAt: content.createdAt,
-            updatedAt: content.updatedAt,
-            lastMessageSnippet: lastMsg
-              ? `${lastMsg.role}: ${lastMsg.content.slice(0, 35)}...`
-              : 'No messages',
-          });
-        } catch {
-          // 파싱 에러 스킵
-        }
-      }
-
-      // 최근 수정된 순으로 정렬
-      list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      setSessions((prev) => (sessionsEqual(prev, list) ? prev : list));
-    } catch {
-      // 스킵
-    }
-  }, [projectId]);
-
-  // 1. 키 입력 리스너 — 단일 키 단축키 제거, ESC로 Talk 탭 복귀만 처리
-  useInput((_input, key) => {
-    if (key.escape && activeTab !== 'talk') {
-      setActiveTab('talk');
-      addLog('Talk 탭으로 복귀');
-    }
-    // 그 외 모든 키 입력은 ChatPanel(또는 다른 탭의 자체 useInput)이 처리
-  });
-
-  // Hub adapter 등록 — binary 부재 시 graceful degradation (catch 무시)
   useEffect(() => {
     import('../../core/providers/claude-adapter.js')
       .then((m) => hub.registerAdapter(new m.ClaudeAdapter()))
@@ -214,7 +263,9 @@ export const HiddinkTuiDashboard: FC<DashboardProps> = ({ cwd }) => {
     import('../../core/providers/codex-adapter.js')
       .then((m) => hub.registerAdapter(new m.CodexAdapter()))
       .catch(() => {});
-    // kimi-adapter는 아직 구현 중 — binary 부재 시 graceful degradation
+    import('../../core/providers/agy-adapter.js')
+      .then((m) => hub.registerAdapter(new m.AgyAdapter()))
+      .catch(() => {});
     (
       import('../../core/providers/kimi-adapter.js') as Promise<{
         KimiAdapter: new () => Parameters<typeof hub.registerAdapter>[0];
@@ -222,186 +273,37 @@ export const HiddinkTuiDashboard: FC<DashboardProps> = ({ cwd }) => {
     )
       .then((m) => hub.registerAdapter(new m.KimiAdapter()))
       .catch(() => {});
+
     return () => {
       hub.close().catch(() => {});
     };
   }, [hub]);
 
-  // 2. 초기 렌더링 및 실시간 동기화
-  useEffect(() => {
-    addLog(`CWD 감지: ${cwd}`);
-    addLog(`Project ID 할당: ${projectId}`);
-
-    // 로컬 설정 파일 로딩
-    try {
-      const projectDir = getProjectStateDir(projectId);
-      const rcPath = join(projectDir, '.hiddinkrc.json');
-      if (existsSync(rcPath)) {
-        const rc = JSON.parse(readFileSync(rcPath, 'utf-8'));
-        setActiveProviders(rc.activeProviders || ['claude', 'agy']);
-        setLanguage(rc.language || 'en');
-        addLog('가상 프로젝트 설정(.hiddinkrc.json) 로드 완료.');
-      } else {
-        setActiveProviders(['claude', 'agy']);
-        addLog('디폴트 프로젝트 설정 적용.');
-      }
-    } catch {
-      addLog('설정 파일 로딩 실패, 디폴트 유지.');
-    }
-
-    // 2초 주기로 세션 및 상태 변화 동기화 (Polling)
-    const updateInterval = setInterval(syncSessions, 2000);
-
-    syncSessions();
-
-    return () => clearInterval(updateInterval);
-  }, [projectId, cwd, addLog, syncSessions]);
-
   return (
     <FullScreenContainer>
-      <Box flexDirection="column" padding={1} flexGrow={1}>
-        {/* 1. 헤더 — memoized, never re-renders during typing */}
-        <DashboardHeader cwd={cwd} projectId={projectId} />
+      {(size) => {
+        const showGraph = shouldShowGitGraph(size);
+        const graphWidth = gitGraphWidth(size.columns);
 
-        {/* 2. 네비게이션 탭 */}
-        <Box marginBottom={1} justifyContent="flex-start">
-          <Box marginRight={2}>
-            <Text inverse={activeTab === 'sessions'} color="yellow" bold={activeTab === 'sessions'}>
-              {' [S] Active Sessions '}
-            </Text>
-          </Box>
-          <Box marginRight={2}>
-            <Text inverse={activeTab === 'rag'} color="magenta" bold={activeTab === 'rag'}>
-              {' [R] RAG Knowledge '}
-            </Text>
-          </Box>
-          <Box marginRight={2}>
-            <Text inverse={activeTab === 'settings'} color="blue" bold={activeTab === 'settings'}>
-              {' [C] Configurations '}
-            </Text>
-          </Box>
-          <Box>
-            <Text inverse={activeTab === 'talk'} color="green" bold={activeTab === 'talk'}>
-              {' [T] Talk '}
-            </Text>
-          </Box>
-        </Box>
-
-        {/* 2-1. 슬래시 명령 안내 — memoized, static */}
-        <ShortcutHint />
-
-        {/* 3. 메인 디스플레이 박스 */}
-        <Box flexGrow={1} minHeight={10} flexDirection="column" marginTop={1} marginBottom={1}>
-          {activeTab === 'sessions' && (
-            <Box flexDirection="column">
-              <Box marginBottom={1}>
-                <Text bold color="yellow">
-                  📝 실시간 활성 대화 스레드 ({sessions.length}개)
-                </Text>
-              </Box>
-              {sessions.length === 0 ? (
-                <Text color="gray">
-                  활성화된 대화 세션이 없습니다. 에이전트를 구동해 대화를 시작해 보세요!
-                </Text>
-              ) : (
-                sessions.slice(0, 4).map((s, idx) => (
-                  <Box
-                    key={s.sessionId}
-                    flexDirection="row"
-                    justifyContent="space-between"
-                    marginBottom={0}
-                  >
-                    <Text color="cyan">
-                      {idx + 1}. {s.sessionId.slice(-13)}
-                    </Text>
-                    <Text color="white" wrap="truncate">
-                      {' '}
-                      {s.lastMessageSnippet}{' '}
-                    </Text>
-                    <Text color="gray">({new Date(s.updatedAt).toLocaleTimeString()})</Text>
-                  </Box>
-                ))
-              )}
+        return (
+          <Box flexDirection="row" padding={1} flexGrow={1}>
+            <Box flexDirection="column" flexGrow={1} marginRight={showGraph ? 1 : 0}>
+              <ChatPanel
+                hub={hub}
+                cwd={cwd}
+                onCommand={(cmd) => cmd === 'exit' && process.exit(0)}
+              />
             </Box>
-          )}
-
-          {activeTab === 'rag' && (
-            <Box flexDirection="column">
-              <Box marginBottom={1}>
-                <Text bold color="magenta">
-                  🧠 로컬 RAG 지식 & 피드백 저장소
-                </Text>
-              </Box>
-              <Text color="brightWhite">
-                데이터베이스 경로: ~/.hiddink-harness/projects/{projectId}/memory.db
-              </Text>
-              <Box marginTop={1} flexDirection="column">
-                <Text color="gray">• Ontology Concepts: 0 registered</Text>
-                <Text color="gray">• Error auto-recovery logs: active</Text>
-                <Text color="gray">• Evaluation feedbacks collected: 0 feedbacks</Text>
-              </Box>
-            </Box>
-          )}
-
-          {activeTab === 'talk' && (
-            <ChatPanel
-              hub={hub}
-              cwd={cwd}
-              onCommand={(cmd) => {
-                if (cmd === 'sessions' || cmd === 'rag' || cmd === 'settings' || cmd === 'talk') {
-                  setActiveTab(cmd);
-                  addLog(`탭 전환: [${cmd}]`);
-                } else if (cmd === 'exit') {
-                  process.exit(0);
-                }
-              }}
-            />
-          )}
-
-          {activeTab === 'settings' && (
-            <Box flexDirection="column">
-              <Box marginBottom={1}>
-                <Text bold color="blue">
-                  🔧 Hiddink 가상 프로젝트 설정 (.hiddinkrc.json)
-                </Text>
-              </Box>
-              <Text>
-                • 기본 언어:{' '}
-                <Text color="yellow" bold>
-                  {language.toUpperCase()}
-                </Text>
-              </Text>
-              <Text>
-                • 활성 에이전트 서비스: <Text color="green">{activeProviders.join(', ')}</Text>
-              </Text>
-              <Box marginTop={1}>
-                <Text color="gray">
-                  * 가상 폴더는 ~/.hiddink-harness/projects/ 에 격리되어 있습니다.
-                </Text>
-              </Box>
-            </Box>
-          )}
-        </Box>
-
-        {/* 4. 시스템 로그 창 */}
-        <Box marginTop={1} flexDirection="column">
-          <Text bold color="gray">
-            System Activities:
-          </Text>
-          {systemLogs.length === 0 ? (
-            <Text color="gray">대기 중...</Text>
-          ) : (
-            systemLogs.map((log) => (
-              <Text key={log.id} color="gray">
-                {log.text}
-              </Text>
-            ))
-          )}
-        </Box>
-
-        {/* 5. 하단 안내 바 — memoized, static */}
-        <BottomBar />
-      </Box>
+            {showGraph && (
+              <GitGraphPanel
+                cwd={cwd}
+                maxLines={Math.min(12, Math.max(4, size.rows - 4))}
+                width={graphWidth}
+              />
+            )}
+          </Box>
+        );
+      }}
     </FullScreenContainer>
   );
 };

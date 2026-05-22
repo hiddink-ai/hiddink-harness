@@ -6,8 +6,8 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getProjectId, getProjectStateDir } from '../../../src/core/global-state.js';
 import { ConversationHub } from '../../../src/core/hub.js';
 import { SystemPromptEvolver } from '../../../src/core/providers/system-prompt.js';
 import type {
@@ -59,6 +59,42 @@ function mockSession(
       }
     },
     close: mock(async () => {}),
+  };
+}
+
+function blockingSession(
+  id: string,
+  provider: ProviderId
+): { session: ChatSession; started: Promise<void> } {
+  let resolveStarted: (() => void) | null = null;
+  let resolveClosed: (() => void) | null = null;
+  let closed = false;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const closedPromise = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
+
+  return {
+    started,
+    session: {
+      id,
+      provider,
+      async *send(_message: string): AsyncIterable<NormalizedMessage> {
+        resolveStarted?.();
+        if (!closed) {
+          await closedPromise;
+        }
+        if (_message === '\0') {
+          yield fakeMsg('assistant', 'unreachable');
+        }
+      },
+      close: mock(async () => {
+        closed = true;
+        resolveClosed?.();
+      }),
+    },
   };
 }
 
@@ -257,6 +293,62 @@ describe('ConversationHub.sendTo', () => {
     expect(secondCallOpts.resumeSessionId).toBe('thread-abc');
   });
 
+  test('cancelProvider closes in-flight per-turn session and does not persist cancelled thread id', async () => {
+    const hub = new ConversationHub({ sessionId: 'test', cwd: '/tmp' });
+    const first = blockingSession('thread-cancelled', 'codex');
+    const second = mockSession('thread-next', 'codex', [fakeMsg('assistant', 'ok')]);
+    const adapter = mockAdapter('codex', 'per-turn-resume', [first.session, second]);
+    hub.registerAdapter(adapter);
+
+    const inFlight = collect(hub.sendTo('codex', 'turn to cancel'));
+    await first.started;
+    await hub.cancelProvider('codex');
+    await inFlight;
+    await collect(hub.sendTo('codex', 'next turn'));
+
+    expect(first.session.close).toHaveBeenCalled();
+    const secondCallOpts = (adapter.spawn as ReturnType<typeof mock>).mock.calls[1][0];
+    expect(secondCallOpts.resumeSessionId).toBeUndefined();
+  });
+
+  test('forwards configured model override to provider spawn options', async () => {
+    const hub = new ConversationHub({
+      sessionId: 'test',
+      cwd: '/tmp',
+      initialModels: { codex: 'gpt-5.5' },
+    });
+    const adapter = mockAdapter('codex', 'per-turn-resume', [
+      mockSession('thread-model', 'codex', [fakeMsg('assistant', 'ok')]),
+    ]);
+    hub.registerAdapter(adapter);
+
+    await collect(hub.sendTo('codex', 'hello'));
+
+    const spawnOpts = (adapter.spawn as ReturnType<typeof mock>).mock.calls[0][0];
+    expect(spawnOpts.model).toBe('gpt-5.5');
+    expect(hub.getProviderModel('codex')).toBe('gpt-5.5');
+  });
+
+  test('setProviderModel resets active persistent provider session before next send', async () => {
+    const hub = new ConversationHub({ sessionId: 'test', cwd: '/tmp' });
+    const firstSession = mockSession('sess-1', 'claude', [fakeMsg('assistant', 'one')]);
+    const secondSession = mockSession('sess-2', 'claude', [fakeMsg('assistant', 'two')]);
+    const adapter = mockAdapter('claude', 'persistent-bidirectional', [
+      firstSession,
+      secondSession,
+    ]);
+    hub.registerAdapter(adapter);
+
+    await collect(hub.sendTo('claude', 'turn 1'));
+    await hub.setProviderModel('claude', 'opus-4.7');
+    await collect(hub.sendTo('claude', 'turn 2'));
+
+    expect(firstSession.close).toHaveBeenCalledTimes(1);
+    expect(adapter.spawn).toHaveBeenCalledTimes(2);
+    const secondSpawnOpts = (adapter.spawn as ReturnType<typeof mock>).mock.calls[1][0];
+    expect(secondSpawnOpts.model).toBe('opus-4.7');
+  });
+
   test('pty-wrap lifecycle yields not-implemented error message', async () => {
     const hub = new ConversationHub({ sessionId: 'test', cwd: '/tmp' });
     const adapter = mockAdapter('agy', 'pty-wrap', []);
@@ -427,7 +519,11 @@ describe('ConversationHub.appendSystemContext', () => {
 
 describe('ConversationHub session save/load', () => {
   const testSessionId = `hub-test-${Date.now()}`;
-  const sessionsDir = join(homedir(), '.hiddink-harness', 'sessions');
+  const testCwd = '/projects/my-app';
+  const sessionDirs = [testCwd, '/tmp'].map((cwd) =>
+    join(getProjectStateDir(getProjectId(cwd)), 'sessions')
+  );
+  const sessionsDir = sessionDirs[0];
 
   beforeEach(() => {
     if (!existsSync(sessionsDir)) {
@@ -436,16 +532,18 @@ describe('ConversationHub session save/load', () => {
   });
 
   afterEach(() => {
-    const file = join(sessionsDir, `session-${testSessionId}.json`);
-    if (existsSync(file)) {
-      rmSync(file);
+    for (const dir of sessionDirs) {
+      const file = join(dir, `session-${testSessionId}.json`);
+      if (existsSync(file)) {
+        rmSync(file);
+      }
     }
   });
 
   test('saveSession and loadSession round-trip history and system prompt', async () => {
     const hub = new ConversationHub({
       sessionId: testSessionId,
-      cwd: '/projects/my-app',
+      cwd: testCwd,
       initialSystemPrompt: { project: 'PROJECT CONTENT' },
     });
     hub.appendSystemContext('session', 'accumulated decision A');
@@ -459,7 +557,7 @@ describe('ConversationHub session save/load', () => {
 
     await hub.saveSession();
 
-    const restored = ConversationHub.loadSession(testSessionId);
+    const restored = ConversationHub.loadSession(testSessionId, testCwd);
 
     // History should contain: user message + assistant reply = 2 entries.
     // (No history getter is exposed; we verify indirectly through another sendTo.)
@@ -480,9 +578,10 @@ describe('ConversationHub session save/load', () => {
   });
 
   test('per-turn lastThreadId survives save/load round-trip', async () => {
+    const cwd = '/tmp';
     const hub = new ConversationHub({
       sessionId: testSessionId,
-      cwd: '/tmp',
+      cwd,
     });
 
     const adapter = mockAdapter('codex', 'per-turn-resume', [
@@ -493,7 +592,7 @@ describe('ConversationHub session save/load', () => {
 
     await hub.saveSession();
 
-    const restored = ConversationHub.loadSession(testSessionId);
+    const restored = ConversationHub.loadSession(testSessionId, cwd);
     const newAdapter = mockAdapter('codex', 'per-turn-resume', [
       mockSession('thread-99', 'codex', [fakeMsg('assistant', 'ok2')]),
     ]);
@@ -502,6 +601,20 @@ describe('ConversationHub session save/load', () => {
 
     const secondSpawnOpts = (newAdapter.spawn as ReturnType<typeof mock>).mock.calls[0][0];
     expect(secondSpawnOpts.resumeSessionId).toBe('thread-99');
+  });
+
+  test('model overrides survive save/load round-trip', async () => {
+    const cwd = '/tmp';
+    const hub = new ConversationHub({
+      sessionId: testSessionId,
+      cwd,
+      initialModels: { codex: 'gpt-5.5' },
+    });
+
+    await hub.saveSession();
+
+    const restored = ConversationHub.loadSession(testSessionId, cwd);
+    expect(restored.getProviderModel('codex')).toBe('gpt-5.5');
   });
 });
 

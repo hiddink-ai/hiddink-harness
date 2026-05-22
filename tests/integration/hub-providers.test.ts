@@ -1,5 +1,5 @@
 /**
- * Integration tests: ConversationHub × 3 providers (claude / codex / kimi).
+ * Integration tests: ConversationHub × 4 providers (claude / codex / kimi / agy).
  *
  * Test scope:
  *  Tests 1–2  use real adapter class instances to verify identity + availability contracts.
@@ -9,15 +9,16 @@
  *
  * Mock strategy:
  *  - Adapter `spawn()` and `isAvailable()` are replaced with bun:test `mock()` functions.
- *  - No real CLI binary (claude / codex / kimi) is invoked anywhere.
+ *  - No real CLI binary (claude / codex / kimi / agy) is invoked anywhere.
  *  - Fixture files in ./fixtures/ document the expected raw JSONL protocol per provider.
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getProjectId, getProjectStateDir } from '../../src/core/global-state.js';
 import { ConversationHub } from '../../src/core/hub.js';
+import { AgyAdapter } from '../../src/core/providers/agy-adapter.js';
 import { ClaudeAdapter } from '../../src/core/providers/claude-adapter.js';
 import { CodexAdapter } from '../../src/core/providers/codex-adapter.js';
 import { KimiAdapter } from '../../src/core/providers/kimi-adapter.js';
@@ -92,17 +93,20 @@ function makeAdapter(
 // Session file cleanup — persisted files created by saveSession() in test 10
 // ---------------------------------------------------------------------------
 
-const createdSessionIds: string[] = [];
+const createdSessions: Array<{ id: string; cwd: string }> = [];
 
-function trackSessionId(id: string): string {
-  createdSessionIds.push(id);
+function sessionFilePath(id: string, cwd: string): string {
+  return join(getProjectStateDir(getProjectId(cwd)), 'sessions', `session-${id}.json`);
+}
+
+function trackSessionId(id: string, cwd: string): string {
+  createdSessions.push({ id, cwd });
   return id;
 }
 
 afterEach(() => {
-  const sessionsDir = join(homedir(), '.hiddink-harness', 'sessions');
-  for (const id of createdSessionIds.splice(0)) {
-    const fp = join(sessionsDir, `session-${id}.json`);
+  for (const { id, cwd } of createdSessions.splice(0)) {
+    const fp = sessionFilePath(id, cwd);
     if (existsSync(fp)) {
       try {
         rmSync(fp);
@@ -114,20 +118,22 @@ afterEach(() => {
 });
 
 // ===========================================================================
-// [1] Hub.registerAdapter — 3 real adapter classes
+// [1] Hub.registerAdapter — 4 real adapter classes
 // ===========================================================================
 
-describe('[1] Hub.registerAdapter — 3 adapters (claude / codex / kimi)', () => {
-  it('accepts all three real adapter class instances without error', () => {
+describe('[1] Hub.registerAdapter — 4 adapters (claude / codex / kimi / agy)', () => {
+  it('accepts all four real adapter class instances without error', () => {
     const hub = new ConversationHub({ sessionId: 'int-reg-1', cwd: '/tmp' });
 
     hub.registerAdapter(new ClaudeAdapter());
     hub.registerAdapter(new CodexAdapter());
     hub.registerAdapter(new KimiAdapter());
+    hub.registerAdapter(new AgyAdapter());
 
     expect(hub.hasAdapter('claude')).toBe(true);
     expect(hub.hasAdapter('codex')).toBe(true);
     expect(hub.hasAdapter('kimi')).toBe(true);
+    expect(hub.hasAdapter('agy')).toBe(true);
   });
 
   it('overwrites an earlier registration for the same provider id', () => {
@@ -146,6 +152,9 @@ describe('[1] Hub.registerAdapter — 3 adapters (claude / codex / kimi)', () =>
 
     expect(new KimiAdapter().id).toBe('kimi');
     expect(new KimiAdapter().lifecycle).toBe('persistent-bidirectional');
+
+    expect(new AgyAdapter().id).toBe('agy');
+    expect(new AgyAdapter().lifecycle).toBe('per-turn-resume');
   });
 });
 
@@ -173,18 +182,20 @@ describe('[2] Hub.listAvailable — per-adapter isAvailable mock', () => {
     expect(await hub.listAvailable()).toHaveLength(0);
   });
 
-  it('returns all three when all three report available=true', async () => {
+  it('returns all four when all four report available=true', async () => {
     const hub = new ConversationHub({ sessionId: 'int-avail-3', cwd: '/tmp' });
 
     hub.registerAdapter(makeAdapter('claude', 'persistent-bidirectional', [], true));
     hub.registerAdapter(makeAdapter('codex', 'per-turn-resume', [], true));
     hub.registerAdapter(makeAdapter('kimi', 'persistent-bidirectional', [], true));
+    hub.registerAdapter(makeAdapter('agy', 'per-turn-resume', [], true));
 
     const available = await hub.listAvailable();
-    expect(available).toHaveLength(3);
+    expect(available).toHaveLength(4);
     expect(available).toContain('claude');
     expect(available).toContain('codex');
     expect(available).toContain('kimi');
+    expect(available).toContain('agy');
   });
 });
 
@@ -244,7 +255,7 @@ describe('[3] Hub.sendTo("claude") — streaming NormalizedMessage via persisten
     await collect(hub.sendTo('claude', 'Ping'));
 
     // Save and inspect persisted history as the only observable side-channel
-    const sessionId = trackSessionId(`int-claude-hist-verify-${Date.now()}`);
+    const sessionId = trackSessionId(`int-claude-hist-verify-${Date.now()}`, '/tmp');
     const hub2 = new ConversationHub({ sessionId, cwd: '/tmp' });
     hub2.registerAdapter(
       makeAdapter('claude', 'persistent-bidirectional', [
@@ -254,7 +265,7 @@ describe('[3] Hub.sendTo("claude") — streaming NormalizedMessage via persisten
     await collect(hub2.sendTo('claude', 'msg'));
     await hub2.saveSession();
 
-    const fp = join(homedir(), '.hiddink-harness', 'sessions', `session-${sessionId}.json`);
+    const fp = sessionFilePath(sessionId, '/tmp');
     const saved = JSON.parse(readFileSync(fp, 'utf-8'));
     expect(Array.isArray(saved.history)).toBe(true);
     expect(saved.history.length).toBeGreaterThanOrEqual(2); // user + assistant
@@ -709,8 +720,9 @@ describe('[9] Hub.fallbackChain — first provider fails → next provider', () 
 
 describe('[10] Session persistence — saveSession / loadSession round-trip', () => {
   it('saveSession() writes a JSON file with history and loadSession() restores it', async () => {
-    const sessionId = trackSessionId(`int-persist-${Date.now()}`);
-    const hub = new ConversationHub({ sessionId, cwd: '/workspace' });
+    const cwd = '/workspace';
+    const sessionId = trackSessionId(`int-persist-${Date.now()}`, cwd);
+    const hub = new ConversationHub({ sessionId, cwd });
 
     hub.registerAdapter(
       makeAdapter('claude', 'persistent-bidirectional', [
@@ -721,10 +733,10 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
 
     await hub.saveSession();
 
-    const filePath = join(homedir(), '.hiddink-harness', 'sessions', `session-${sessionId}.json`);
+    const filePath = sessionFilePath(sessionId, cwd);
     expect(existsSync(filePath)).toBe(true);
 
-    const restored = ConversationHub.loadSession(sessionId);
+    const restored = ConversationHub.loadSession(sessionId, cwd);
     expect(restored instanceof ConversationHub).toBe(true);
     // Adapters are NOT restored — callers must re-register
     expect(restored.hasAdapter('claude')).toBe(false);
@@ -737,8 +749,9 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
   });
 
   it('persisted JSON file contains correct lastThreadIds for codex', async () => {
-    const sessionId = trackSessionId(`int-persist-codex-${Date.now()}`);
-    const hub = new ConversationHub({ sessionId, cwd: '/workspace' });
+    const cwd = '/workspace';
+    const sessionId = trackSessionId(`int-persist-codex-${Date.now()}`, cwd);
+    const hub = new ConversationHub({ sessionId, cwd });
 
     hub.registerAdapter(
       makeAdapter('codex', 'per-turn-resume', [
@@ -749,7 +762,7 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
 
     await hub.saveSession();
 
-    const filePath = join(homedir(), '.hiddink-harness', 'sessions', `session-${sessionId}.json`);
+    const filePath = sessionFilePath(sessionId, cwd);
     const saved = JSON.parse(readFileSync(filePath, 'utf-8'));
 
     expect(saved.lastThreadIds).toBeDefined();
@@ -757,8 +770,9 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
   });
 
   it('persisted JSON file contains history entries with correct roles', async () => {
-    const sessionId = trackSessionId(`int-persist-hist-${Date.now()}`);
-    const hub = new ConversationHub({ sessionId, cwd: '/workspace' });
+    const cwd = '/workspace';
+    const sessionId = trackSessionId(`int-persist-hist-${Date.now()}`, cwd);
+    const hub = new ConversationHub({ sessionId, cwd });
 
     hub.registerAdapter(
       makeAdapter('kimi', 'persistent-bidirectional', [
@@ -769,7 +783,7 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
 
     await hub.saveSession();
 
-    const filePath = join(homedir(), '.hiddink-harness', 'sessions', `session-${sessionId}.json`);
+    const filePath = sessionFilePath(sessionId, cwd);
     const saved = JSON.parse(readFileSync(filePath, 'utf-8'));
 
     const roles = (saved.history as NormalizedMessage[]).map((m) => m.role);

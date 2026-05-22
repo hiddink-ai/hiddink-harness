@@ -310,6 +310,12 @@ export class KimiAdapter extends StreamJsonAdapterBase {
     return null;
   }
 
+  override isTurnCompleteEvent(event: unknown): boolean {
+    if (!event || typeof event !== 'object') return false;
+    const eventType = (event as Record<string, unknown>).type;
+    return eventType === 'done' || eventType === 'stop';
+  }
+
   // -------------------------------------------------------------------------
   // serializeUserMessage
   // -------------------------------------------------------------------------

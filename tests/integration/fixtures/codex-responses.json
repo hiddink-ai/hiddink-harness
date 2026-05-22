@@ -22,7 +22,7 @@
     }
   },
   {
-    "description": "Resume call args: codex exec resume <thread_id> '<prompt>' --json --sandbox workspace-write --ask-for-approval never",
+    "description": "Resume call args: codex exec resume --json -c approval_policy=\"never\" <thread_id> '<prompt>'",
     "note": "Second-turn command uses thread_id from thread.started event as positional argument"
   }
 ]

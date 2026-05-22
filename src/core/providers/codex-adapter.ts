@@ -22,6 +22,7 @@
 
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { devLog } from '../../utils/dev-log.js';
 import type { ChatSession, NormalizedMessage, ProviderAdapter, SpawnOptions } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,12 @@ interface CodexTurnCompletedEvent {
   usage?: CodexUsage;
 }
 
+interface CodexTurnFailedEvent {
+  type: 'turn.failed';
+  error?: { message?: string; [key: string]: unknown } | string;
+  [key: string]: unknown;
+}
+
 interface CodexErrorEvent {
   type: 'error';
   message?: string;
@@ -84,6 +91,7 @@ type CodexEvent =
   | CodexItemStartedEvent
   | CodexItemCompletedEvent
   | CodexTurnCompletedEvent
+  | CodexTurnFailedEvent
   | CodexErrorEvent;
 
 // ---------------------------------------------------------------------------
@@ -186,6 +194,19 @@ function normalizeEvent(
       };
     }
 
+    case 'turn.failed': {
+      const err =
+        typeof event.error === 'string'
+          ? event.error
+          : (event.error?.message ?? 'Codex turn failed');
+      return {
+        role: 'system',
+        content: err,
+        timestamp: new Date().toISOString(),
+        providerMeta: { codexEvent: 'turn.failed', codexError: event.error ?? null },
+      };
+    }
+
     case 'error': {
       const errText = event.message ?? `Codex error (code=${event.code ?? 'unknown'})`;
       return {
@@ -227,6 +248,35 @@ function buildStdinPayload(systemPrompt: string, userMessage: string): string {
   return `[SYSTEM]\n${systemPrompt}\n\n[USER]\n${userMessage}`;
 }
 
+function childHasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function terminateChild(child: ChildProcess): Promise<void> {
+  if (childHasExited(child)) return;
+
+  const exited = new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      if (!childHasExited(child)) {
+        child.kill('SIGKILL');
+      }
+      resolve();
+    }, 2_000);
+
+    child.once('exit', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.once('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
+  child.kill('SIGTERM');
+  await exited;
+}
+
 // ---------------------------------------------------------------------------
 // CodexSession
 // ---------------------------------------------------------------------------
@@ -252,6 +302,7 @@ class CodexSession implements ChatSession {
 
   /** True after close() has been called. */
   private closed = false;
+  private currentChild: ChildProcess | null = null;
 
   constructor(opts: SpawnOptions) {
     this.opts = opts;
@@ -268,13 +319,13 @@ class CodexSession implements ChatSession {
    * Send a user message to Codex and stream the response.
    *
    * First call (no resumeSessionId):
-   *   codex exec --json --sandbox workspace-write --ask-for-approval never
+   *   codex exec --json --sandbox workspace-write -c approval_policy="never" [-m <model>]
    *              --skip-git-repo-check --cd <cwd> -
    *   (prompt written to stdin)
    *
    * Subsequent calls (resumeSessionId present):
-   *   codex exec resume <thread_id> "<prompt>" --json --sandbox workspace-write
-   *              --ask-for-approval never
+   *   codex exec resume --skip-git-repo-check --json -c approval_policy="never"
+   *              [-m <model>] <thread_id> "<prompt>"
    */
   async *send(message: string): AsyncIterable<NormalizedMessage> {
     if (this.closed) {
@@ -290,7 +341,16 @@ class CodexSession implements ChatSession {
     const stdinPayload = buildStdinPayload(this.opts.systemPrompt, message);
 
     const { cmd, args, useStdin } = this.buildCommand(message);
+    devLog('codex.spawn', {
+      cmd,
+      args,
+      cwd: this.opts.cwd,
+      model: this.opts.model,
+      resumeSessionId: this.opts.resumeSessionId,
+      promptLength: message.length,
+    });
     const child = this.spawnProcess(cmd, args);
+    this.currentChild = child;
 
     try {
       yield* this.streamProcess(child, stdinPayload, useStdin, sessionIdRef);
@@ -299,12 +359,21 @@ class CodexSession implements ChatSession {
       if (sessionIdRef.current) {
         this._id = sessionIdRef.current;
       }
+      if (this.currentChild === child) {
+        this.currentChild = null;
+      }
     }
   }
 
-  /** close() is a no-op for per-turn sessions — the subprocess exits naturally. */
+  /** Close the per-turn session and terminate the child if a turn is still running. */
   async close(): Promise<void> {
     this.closed = true;
+    const child = this.currentChild;
+    if (!child) return;
+    await terminateChild(child);
+    if (this.currentChild === child) {
+      this.currentChild = null;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -316,13 +385,16 @@ class CodexSession implements ChatSession {
     args: string[];
     useStdin: boolean;
   } {
-    const baseFlags = ['--json', '--sandbox', 'workspace-write', '--ask-for-approval', 'never'];
+    const approvalConfig = ['-c', 'approval_policy="never"'];
+    const firstTurnFlags = ['--json', '--sandbox', 'workspace-write', ...approvalConfig];
+    const resumeFlags = ['--skip-git-repo-check', '--json', ...approvalConfig];
+    const modelFlags = this.opts.model ? ['-m', this.opts.model] : [];
 
     if (this.opts.resumeSessionId) {
       // Resume an existing thread — pass the message as a positional argument.
       return {
         cmd: 'codex',
-        args: ['exec', 'resume', this.opts.resumeSessionId, message, ...baseFlags],
+        args: ['exec', 'resume', ...resumeFlags, ...modelFlags, this.opts.resumeSessionId, message],
         useStdin: false,
       };
     }
@@ -330,7 +402,15 @@ class CodexSession implements ChatSession {
     // First turn — stream prompt via stdin using the `-` sentinel.
     return {
       cmd: 'codex',
-      args: ['exec', '--skip-git-repo-check', '--cd', this.opts.cwd, ...baseFlags, '-'],
+      args: [
+        'exec',
+        '--skip-git-repo-check',
+        '--cd',
+        this.opts.cwd,
+        ...firstTurnFlags,
+        ...modelFlags,
+        '-',
+      ],
       useStdin: true,
     };
   }
@@ -372,6 +452,8 @@ class CodexSession implements ChatSession {
     const pendingMessages: NormalizedMessage[] = [];
     let resolveNext: (() => void) | null = null;
     let done = false;
+    let providerReportedFailure = false;
+    const stderrChunks: Buffer[] = [];
     // Typed as unknown to accommodate TypeScript's narrowing on event handler callbacks.
     // Validated as Error instance before use.
     let processError: unknown = null;
@@ -396,8 +478,12 @@ class CodexSession implements ChatSession {
         if (!event) {
           continue;
         }
+        devLog('codex.event', { type: event.type });
         const normalized = normalizeEvent(event, sessionIdRef);
         if (normalized !== null) {
+          if (event.type === 'error' || event.type === 'turn.failed') {
+            providerReportedFailure = true;
+          }
           enqueue(normalized);
         }
       }
@@ -407,12 +493,13 @@ class CodexSession implements ChatSession {
       processChunk(chunk);
     });
 
-    child.stderr?.on('data', (_chunk: Buffer) => {
-      // Diagnostic stderr output — intentionally ignored in MVP.
-      // Surface as system message if needed in a future iteration.
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      devLog('codex.stderr', { text: chunk.toString('utf8').slice(0, 2000) });
     });
 
     child.on('error', (err: unknown) => {
+      devLog('codex.process_error', { error: err });
       processError = err;
       done = true;
       if (resolveNext) {
@@ -427,23 +514,30 @@ class CodexSession implements ChatSession {
         const event = parseLine(lineBuffer);
         lineBuffer = '';
         if (event) {
+          devLog('codex.event', { type: event.type });
           const normalized = normalizeEvent(event, sessionIdRef);
           if (normalized !== null) {
+            if (event.type === 'error' || event.type === 'turn.failed') {
+              providerReportedFailure = true;
+            }
             enqueue(normalized);
           }
         }
       }
 
-      if (exitCode !== null && exitCode !== 0 && !processError) {
+      if (exitCode !== null && exitCode !== 0 && !processError && !providerReportedFailure) {
+        const stderr = Buffer.concat(stderrChunks).toString().trim();
+        devLog('codex.exit_nonzero', { exitCode, stderr });
         enqueue({
           role: 'system',
-          content: `Codex process exited with code ${exitCode}`,
+          content: `Codex process exited with code ${exitCode}${stderr ? `: ${stderr}` : ''}`,
           timestamp: new Date().toISOString(),
-          providerMeta: { codexExitCode: exitCode },
+          providerMeta: { codexExitCode: exitCode, stderr: stderr || undefined },
         });
       }
 
       done = true;
+      devLog('codex.exit', { exitCode, threadId: sessionIdRef.current });
       if (resolveNext) {
         resolveNext();
         resolveNext = null;

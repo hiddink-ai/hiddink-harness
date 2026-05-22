@@ -10,6 +10,7 @@ import {
   diffLockfiles,
   generateAndWriteLockfileForDir,
   generateLockfile,
+  getLockfilePath,
   LOCKFILE_NAME,
   LOCKFILE_VERSION,
   type Lockfile,
@@ -232,6 +233,28 @@ describe('lockfile', () => {
 
       const result = await readLockfile(tempDir);
       expect(result?.generatorVersion).toBe('v2');
+    });
+
+    it('can write/read project-state lockfile without creating a project-root lockfile', async () => {
+      const oldHome = process.env.HIDDINK_HARNESS_HOME;
+      process.env.HIDDINK_HARNESS_HOME = join(tempDir, 'harness-home');
+      try {
+        const lockfile = makeLockfile({ generatorVersion: 'state-v1' });
+        await writeLockfile(tempDir, lockfile, { storage: 'project-state' });
+
+        const projectStatePath = getLockfilePath(tempDir, { storage: 'project-state' });
+        await expect(fs.access(projectStatePath)).resolves.toBeNull();
+        await expect(fs.access(join(tempDir, LOCKFILE_NAME))).rejects.toThrow();
+
+        const readBack = await readLockfile(tempDir, { storage: 'project-state' });
+        expect(readBack?.generatorVersion).toBe('state-v1');
+      } finally {
+        if (oldHome === undefined) {
+          delete process.env.HIDDINK_HARNESS_HOME;
+        } else {
+          process.env.HIDDINK_HARNESS_HOME = oldHome;
+        }
+      }
     });
   });
 

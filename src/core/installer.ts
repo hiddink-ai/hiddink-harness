@@ -42,7 +42,7 @@ import {
   getTemplateSourcePath,
   type InstallComponent,
 } from './layout.js';
-import { generateAndWriteLockfileForDir } from './lockfile.js';
+import { generateAndWriteLockfileForDir, runtimeLockfileStorage } from './lockfile.js';
 import { installRtk, isRtkInstalled } from './rtk-installer.js';
 import {
   getAgentDomain,
@@ -488,7 +488,9 @@ export async function install(options: InstallOptions): Promise<InstallResult> {
     }
 
     // Generate lockfile for three-way merge support
-    const lockfileResult = await generateAndWriteLockfileForDir(options.targetDir);
+    const lockfileResult = await generateAndWriteLockfileForDir(options.targetDir, {
+      storage: runtimeLockfileStorage(options.targetDir),
+    });
     if (lockfileResult.warning) {
       result.warnings.push(lockfileResult.warning);
       warn('install.lockfile_failed', { error: lockfileResult.warning });
