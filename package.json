@@ -46,7 +46,8 @@
     "docs:build": "vitepress build docs",
     "prepare": "sh scripts/setup-hooks.sh || true",
     "setup:hooks": "sh scripts/setup-hooks.sh",
-    "prepublishOnly": "bun run build && bun run test"
+    "prepublishOnly": "bun run build && bun run test",
+    "version": "bun scripts/bump-version.ts $npm_package_version && git add templates/manifest.json"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
