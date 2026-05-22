@@ -172,10 +172,12 @@ describe('ClaudeAdapter', () => {
       expect(args).toContain('stream-json');
       expect(args).toContain('--output-format');
       expect(args).toContain('--bare');
+      expect(args).toContain('--verbose');
       expect(args).toContain('--permission-mode');
       expect(args).toContain('bypassPermissions');
-      expect(args).toContain('--cwd');
-      expect(args).toContain('/workspace');
+      // --cwd is passed as spawn process option, not as a CLI flag
+      expect(args).not.toContain('--cwd');
+      expect(args).not.toContain('/workspace');
     });
 
     it('uses --session-id for a new session', () => {

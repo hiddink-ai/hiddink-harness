@@ -1,12 +1,14 @@
 /**
  * Claude CLI adapter — persistent-bidirectional stream-json provider.
  *
- * Spawns: claude -p "" --bare --input-format stream-json --output-format stream-json
+ * Spawns: claude -p "" --verbose --bare --input-format stream-json --output-format stream-json
  *           --include-partial-messages --include-hook-events
  *           --permission-mode bypassPermissions
  *           --allowedTools "Read,Write,Edit,Bash,Glob,Grep"
  *           --session-id <uuid>  [--resume <id>]
- *           --cwd <cwd>
+ *           (cwd는 spawn options으로 전달, CLI flag 아님)
+ *
+ * Note: --verbose is required when using --output-format=stream-json with -p (claude CLI 2.1.147+)
  *
  * Session init event: {type:"system", subtype:"init", session_id:"...", ...}
  *
@@ -125,6 +127,7 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
     const args: string[] = [
       '-p',
       '',
+      '--verbose', // required for --output-format=stream-json with -p (claude CLI 2.1.147+)
       '--bare',
       '--input-format',
       'stream-json',
@@ -136,8 +139,6 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
       'bypassPermissions',
       '--allowedTools',
       allowedTools,
-      '--cwd',
-      opts.cwd,
     ];
 
     if (opts.resumeSessionId) {
