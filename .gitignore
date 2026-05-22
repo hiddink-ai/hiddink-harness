@@ -16,12 +16,14 @@
 !/bunfig.toml
 !/CONTRIBUTING.md
 !/DEVELOPER_GUIDE.md
+!/crates/
 !/guides/
 !/LICENSE
 !/package.json
 !/packages/
 !/README.md
 !/README.ko.md
+!/bin/
 !/scripts/
 !/src/
 !/templates/
@@ -35,6 +37,7 @@
 **/.venv/
 **/dist/
 **/build/
+**/target/
 **/coverage/
 **/.DS_Store
 **/Thumbs.db

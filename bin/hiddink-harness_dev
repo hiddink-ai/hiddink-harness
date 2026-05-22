@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Local dev launcher.
+#
+# Default: run the TypeScript dev CLI with Bun hot reload.
+# The Phase 1 Rust ratatui scaffold remains available via:
+#   hiddink-harness_dev --rust ...
+set -euo pipefail
+
+# Resolve the absolute path of this script even when invoked via symlink
+# (e.g. `bun link` creates ~/.bun/bin/hiddink-harness_dev -> repo/bin/hiddink-harness_dev)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+setup_log() {
+  local log_dir timestamp project_id global_dir
+  global_dir="${HIDDINK_HARNESS_HOME:-$HOME/.hiddink-harness}"
+  project_id="$(python3 - "$PWD" <<'PY'
+import hashlib
+import os
+import re
+import sys
+
+path = sys.argv[1].strip().rstrip("/") or "/"
+folder = os.path.basename(path) or "root"
+safe = re.sub(r"[^a-zA-Z0-9-_]", "_", folder)
+digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+print(f"{safe}-{digest}")
+PY
+)"
+  log_dir="${HIDDINK_HARNESS_DEV_LOG_DIR:-$global_dir/projects/$project_id/logs}"
+  mkdir -p "$log_dir"
+  timestamp="$(date '+%Y%m%d-%H%M%S')"
+  export HIDDINK_HARNESS_DEV_LOG="${HIDDINK_HARNESS_DEV_LOG:-$log_dir/hdk-dev-$timestamp-$$.log}"
+  python3 - "$HIDDINK_HARNESS_DEV_LOG" "$PWD" "$$" "$@" <<'PY' 2>/dev/null || true
+import json
+import sys
+from datetime import datetime, timezone
+
+log_path, cwd, pid, *argv = sys.argv[1:]
+with open(log_path, "a", encoding="utf-8") as f:
+    f.write(json.dumps({
+        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "event": "hdk-dev.launch",
+        "pid": int(pid),
+        "cwd": cwd,
+        "argv": argv,
+    }, ensure_ascii=False) + "\n")
+PY
+  printf 'hdk-dev log: %s\n' "$HIDDINK_HARNESS_DEV_LOG" >&2
+}
+
+run_ink() {
+  exec bun run "$PROJECT_ROOT/src/cli/index.ts" "$@"
+}
+
+run_rust_tui() {
+  if ! command -v cargo >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+hiddink-harness_dev: cargo is required for the Rust ratatui TUI.
+Install Rust/Cargo or run the legacy Ink UI with:
+  HIDDINK_HARNESS_DEV_LEGACY_INK=1 hiddink-harness_dev
+EOF
+    exit 127
+  fi
+
+  exec cargo run --manifest-path "$PROJECT_ROOT/crates/hiddink-tui/Cargo.toml" -- "$@"
+}
+
+setup_log "$@"
+
+case "${1:-}" in
+  --rust)
+    shift
+    run_rust_tui "$@"
+    ;;
+  *)
+    run_ink "$@"
+    ;;
+esac

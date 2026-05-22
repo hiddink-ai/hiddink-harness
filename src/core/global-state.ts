@@ -19,6 +19,9 @@ import { debug, warn } from '../utils/logger.js';
  * Hiddink 전역 홈 디렉토리 경로를 리턴합니다.
  */
 export function getGlobalStateDir(): string {
+  if (process.env.HIDDINK_HARNESS_HOME?.trim()) {
+    return process.env.HIDDINK_HARNESS_HOME.trim();
+  }
   return join(homedir(), '.hiddink-harness');
 }
 
@@ -42,6 +45,13 @@ export function getProjectId(cwd: string = process.cwd()): string {
  */
 export function getProjectStateDir(projectId: string): string {
   return join(getGlobalStateDir(), 'projects', projectId);
+}
+
+/**
+ * CWD를 기준으로 전역 프로젝트 격리 데이터 디렉토리 경로를 리턴합니다.
+ */
+export function getProjectStateDirForCwd(cwd: string = process.cwd()): string {
+  return getProjectStateDir(getProjectId(cwd));
 }
 
 /**

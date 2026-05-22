@@ -6,16 +6,16 @@
  *  - Manage per-provider ChatSession lifetime (spawn / reuse / close).
  *  - Compose system prompts via SystemPromptEvolver before each provider call.
  *  - Implement cross-provider patterns: parallelConsensus, sequentialHandoff, fallbackChain.
- *  - Persist and restore full conversation state to/from ~/.hiddink-harness/sessions/.
+ *  - Persist and restore conversation state under ~/.hiddink-harness/projects/{projectId}/sessions/.
  *
  * The Hub is NOT responsible for subprocess I/O — that belongs to adapters.
  * The Hub is NOT responsible for system prompt content — callers push layers in.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { getGlobalStateDir } from './global-state.js';
+import { devLog } from '../utils/dev-log.js';
+import { getGlobalStateDir, getProjectId, getProjectStateDir } from './global-state.js';
 import {
   SystemPromptEvolver,
   type SystemPromptLayer,
@@ -41,6 +41,8 @@ export interface HubState {
   cwd: string;
   history: NormalizedMessage[];
   systemPrompt: SystemPromptEvolver;
+  /** Optional explicit model per provider. Empty means provider CLI default/config. */
+  modelOverrides: Map<ProviderId, string>;
   /** Long-lived sessions for persistent-bidirectional providers (claude, kimi). */
   activeSessions: Map<ProviderId, ChatSession>;
   /**
@@ -56,6 +58,7 @@ interface PersistedHubState {
   cwd: string;
   history: NormalizedMessage[];
   systemPrompt: SystemPromptState;
+  modelOverrides?: Record<string, string>;
   lastThreadIds: Record<string, string>;
 }
 
@@ -66,17 +69,23 @@ interface PersistedHubState {
 export class ConversationHub {
   private readonly adapters: Map<ProviderId, ProviderAdapter> = new Map();
   private readonly state: HubState;
+  /** Sessions currently inside sendTo(); used for ESC/cancel from the UI. */
+  private readonly inFlightSessions: Map<ProviderId, ChatSession> = new Map();
 
   constructor(opts: {
     sessionId: string;
     cwd: string;
     initialSystemPrompt?: Partial<SystemPromptState>;
+    initialModels?: Partial<Record<ProviderId, string>>;
   }) {
     this.state = {
       sessionId: opts.sessionId,
       cwd: opts.cwd,
       history: [],
       systemPrompt: new SystemPromptEvolver(opts.initialSystemPrompt),
+      modelOverrides: new Map(
+        Object.entries(opts.initialModels ?? {}) as Array<[ProviderId, string]>
+      ),
       activeSessions: new Map(),
       lastThreadIds: new Map(),
     };
@@ -94,6 +103,26 @@ export class ConversationHub {
   /** Returns true when an adapter has been registered for the given provider. */
   hasAdapter(provider: ProviderId): boolean {
     return this.adapters.has(provider);
+  }
+
+  getProviderModel(provider: ProviderId): string | undefined {
+    return this.state.modelOverrides.get(provider);
+  }
+
+  async setProviderModel(provider: ProviderId, model: string | undefined): Promise<void> {
+    const normalized = model?.trim();
+    if (normalized) {
+      this.state.modelOverrides.set(provider, normalized);
+    } else {
+      this.state.modelOverrides.delete(provider);
+    }
+
+    this.state.lastThreadIds.delete(provider);
+    const active = this.state.activeSessions.get(provider);
+    if (active) {
+      this.state.activeSessions.delete(provider);
+      await active.close();
+    }
   }
 
   /**
@@ -129,8 +158,10 @@ export class ConversationHub {
    * entries and yielded rather than thrown, so callers can handle them inline.
    */
   async *sendTo(provider: ProviderId, message: string): AsyncIterable<NormalizedMessage> {
+    devLog('hub.send.start', { provider, promptLength: message.length });
     const adapter = this.adapters.get(provider);
     if (!adapter) {
+      devLog('hub.send.no_adapter', { provider });
       yield makeErrorMessage(`No adapter registered for provider '${provider}'`);
       return;
     }
@@ -156,17 +187,39 @@ export class ConversationHub {
     try {
       const session = await this.acquireSession(adapter, systemPrompt);
       const assistantChunks: NormalizedMessage[] = [];
+      this.inFlightSessions.set(provider, session);
+      devLog('hub.session.acquired', {
+        provider,
+        lifecycle: adapter.lifecycle,
+        sessionId: session.id,
+        model: this.state.modelOverrides.get(provider),
+      });
 
       try {
         for await (const chunk of session.send(message)) {
           assistantChunks.push(chunk);
+          devLog('hub.send.chunk', {
+            provider,
+            role: chunk.role,
+            contentLength:
+              typeof chunk.content === 'string'
+                ? chunk.content.length
+                : JSON.stringify(chunk.content).length,
+          });
           yield chunk;
         }
       } finally {
+        const stillInFlight = this.inFlightSessions.get(provider) === session;
         if (adapter.lifecycle === 'per-turn-resume') {
           // Store thread ID for the next turn, then tear down the transient session.
-          this.state.lastThreadIds.set(provider, session.id);
+          if (stillInFlight && session.id) {
+            this.state.lastThreadIds.set(provider, session.id);
+            devLog('hub.thread.stored', { provider, sessionId: session.id });
+          }
           await session.close();
+        }
+        if (stillInFlight) {
+          this.inFlightSessions.delete(provider);
         }
         // For persistent-bidirectional, the session stays in activeSessions.
       }
@@ -175,12 +228,48 @@ export class ConversationHub {
       for (const chunk of assistantChunks) {
         this.state.history.push(chunk);
       }
+      devLog('hub.send.done', { provider, chunks: assistantChunks.length });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      devLog('hub.send.error', { provider, error: msg });
       const errMsg = makeErrorMessage(`Provider '${provider}' failed: ${msg}`);
       this.state.history.push(errMsg);
       yield errMsg;
     }
+  }
+
+  /**
+   * Cancel an active provider turn, closing the current session/process and
+   * clearing any resume pointer that may otherwise point at a partial turn.
+   */
+  async cancelProvider(provider: ProviderId): Promise<void> {
+    const inFlight = this.inFlightSessions.get(provider);
+    const active = this.state.activeSessions.get(provider);
+    const session = inFlight ?? active;
+
+    if (!session) {
+      devLog('hub.cancel.no_session', { provider });
+      return;
+    }
+
+    devLog('hub.cancel.start', { provider, sessionId: session.id });
+    this.inFlightSessions.delete(provider);
+    this.state.activeSessions.delete(provider);
+    this.state.lastThreadIds.delete(provider);
+
+    try {
+      await session.close();
+      devLog('hub.cancel.done', { provider, sessionId: session.id });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      devLog('hub.cancel.error', { provider, sessionId: session.id, error: msg });
+      throw err;
+    }
+  }
+
+  /** Cancel multiple provider turns concurrently. */
+  async cancelProviders(providers: ProviderId[]): Promise<void> {
+    await Promise.all([...new Set(providers)].map((provider) => this.cancelProvider(provider)));
   }
 
   // -------------------------------------------------------------------------
@@ -299,10 +388,10 @@ export class ConversationHub {
 
   /**
    * Writes the current session state to
-   * ~/.hiddink-harness/sessions/session-{id}.json
+   * ~/.hiddink-harness/projects/{projectId}/sessions/session-{id}.json
    */
   async saveSession(): Promise<void> {
-    const sessionsDir = join(getGlobalStateDir(), 'sessions');
+    const sessionsDir = join(getProjectStateDir(getProjectId(this.state.cwd)), 'sessions');
     if (!existsSync(sessionsDir)) {
       mkdirSync(sessionsDir, { recursive: true });
     }
@@ -312,6 +401,7 @@ export class ConversationHub {
       cwd: this.state.cwd,
       history: this.state.history,
       systemPrompt: this.state.systemPrompt.serialize(),
+      modelOverrides: Object.fromEntries(this.state.modelOverrides),
       lastThreadIds: Object.fromEntries(this.state.lastThreadIds),
     };
 
@@ -324,11 +414,17 @@ export class ConversationHub {
    * Active sessions and registered adapters are NOT restored — callers must
    * re-register adapters before sending messages.
    */
-  static loadSession(sessionId: string): ConversationHub {
-    const filePath = join(homedir(), '.hiddink-harness', 'sessions', `session-${sessionId}.json`);
+  static loadSession(sessionId: string, cwd: string = process.cwd()): ConversationHub {
+    const projectFilePath = join(
+      getProjectStateDir(getProjectId(cwd)),
+      'sessions',
+      `session-${sessionId}.json`
+    );
+    const legacyFilePath = join(getGlobalStateDir(), 'sessions', `session-${sessionId}.json`);
+    const filePath = existsSync(projectFilePath) ? projectFilePath : legacyFilePath;
 
     if (!existsSync(filePath)) {
-      throw new Error(`Session file not found: ${filePath}`);
+      throw new Error(`Session file not found: ${projectFilePath}`);
     }
 
     const raw = readFileSync(filePath, 'utf-8');
@@ -336,11 +432,14 @@ export class ConversationHub {
 
     const hub = new ConversationHub({
       sessionId: persisted.sessionId,
-      cwd: persisted.cwd,
+      cwd: persisted.cwd ?? cwd,
     });
 
     hub.state.history = persisted.history ?? [];
     hub.state.systemPrompt = SystemPromptEvolver.deserialize(persisted.systemPrompt);
+    hub.state.modelOverrides = new Map(
+      Object.entries(persisted.modelOverrides ?? {}) as Array<[ProviderId, string]>
+    );
 
     for (const [provider, threadId] of Object.entries(persisted.lastThreadIds ?? {})) {
       hub.state.lastThreadIds.set(provider as ProviderId, threadId);
@@ -359,13 +458,14 @@ export class ConversationHub {
    */
   async close(): Promise<void> {
     await Promise.all(
-      [...this.state.activeSessions.values()].map((session) =>
+      [...this.state.activeSessions.values(), ...this.inFlightSessions.values()].map((session) =>
         session.close().catch(() => {
           // Ignore individual close errors during bulk teardown.
         })
       )
     );
     this.state.activeSessions.clear();
+    this.inFlightSessions.clear();
   }
 
   // -------------------------------------------------------------------------
@@ -391,6 +491,7 @@ export class ConversationHub {
       const session = await adapter.spawn({
         systemPrompt,
         cwd: this.state.cwd,
+        model: this.state.modelOverrides.get(provider),
       });
       this.state.activeSessions.set(provider, session);
       return session;
@@ -402,6 +503,7 @@ export class ConversationHub {
       systemPrompt,
       cwd: this.state.cwd,
       resumeSessionId,
+      model: this.state.modelOverrides.get(provider),
     });
   }
 }

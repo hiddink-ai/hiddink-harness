@@ -83,7 +83,7 @@ async function generateCurrentLockfile(targetDir: string): Promise<Lockfile | nu
  */
 export async function syncCheck(
   targetDir: string,
-  options?: { reference?: string }
+  options?: { reference?: string; lockfileStorage?: 'directory' | 'project-state' }
 ): Promise<SyncCheckResult> {
   const empty: SyncCheckResult = {
     inSync: false,
@@ -97,7 +97,9 @@ export async function syncCheck(
   };
 
   const referenceDir = options?.reference ?? targetDir;
-  const reference = await readLockfile(referenceDir);
+  const reference = await readLockfile(referenceDir, {
+    storage: options?.reference ? 'directory' : (options?.lockfileStorage ?? 'directory'),
+  });
 
   if (!reference) {
     return empty;
@@ -227,7 +229,7 @@ export async function exportSnapshot(
   // Embed a fresh lockfile into the snapshot so recipients can check drift
   const lockfile = await generateCurrentLockfile(targetDir);
   if (lockfile) {
-    await writeLockfile(outputPath, lockfile);
+    await writeLockfile(outputPath, lockfile, { storage: 'directory' });
   }
 
   const fileCount = await countFiles(outputPath);

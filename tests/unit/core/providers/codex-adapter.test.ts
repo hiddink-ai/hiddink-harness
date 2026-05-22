@@ -39,6 +39,9 @@ class FakeChildProcess extends EventEmitter {
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
   readonly stdin: Writable;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  readonly killedWith: Array<NodeJS.Signals | number | undefined> = [];
 
   constructor() {
     super();
@@ -58,14 +61,28 @@ class FakeChildProcess extends EventEmitter {
     this.stdout.emit('data', Buffer.from(`${JSON.stringify(json)}\n`));
   }
 
+  /** Emit diagnostic stderr. */
+  emitStderr(text: string): void {
+    this.stderr.emit('data', Buffer.from(text));
+  }
+
   /** Signal normal process exit. */
   emitClose(code = 0): void {
+    this.exitCode = code;
     this.emit('close', code);
   }
 
   /** Signal a spawn-level error (e.g. ENOENT). */
   emitError(err: Error): void {
     this.emit('error', err);
+  }
+
+  kill(signal?: NodeJS.Signals | number): boolean {
+    this.killedWith.push(signal);
+    this.signalCode = typeof signal === 'string' ? signal : 'SIGTERM';
+    this.emit('exit', null, this.signalCode);
+    this.emit('close', null);
+    return true;
   }
 }
 
@@ -274,6 +291,16 @@ describe('normalizeEvent', () => {
     expect(result?.role).toBe('system');
     expect(String(result?.content)).toContain('500');
   });
+
+  test('turn.failed — returns the provider failure message', () => {
+    const ref = makeRef();
+    const result = normalizeEvent(
+      { type: 'turn.failed', error: { message: 'The selected model is not supported' } },
+      ref
+    );
+    expect(result?.role).toBe('system');
+    expect(String(result?.content)).toContain('selected model');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -347,8 +374,31 @@ describe('CodexSession: first turn', () => {
     expect(args).toContain('--skip-git-repo-check');
     expect(args).toContain('--cd');
     expect(args).toContain('/my/project');
+    expect(args).toContain('--sandbox');
+    expect(args).toContain('workspace-write');
+    expect(args).toContain('-c');
+    expect(args).toContain('approval_policy="never"');
+    expect(args).not.toContain('--ask-for-approval');
     // Must not include 'resume' on first turn.
     expect(args).not.toContain('resume');
+  });
+
+  test('first turn forwards explicit model override to codex exec', async () => {
+    const fake = new FakeChildProcess();
+    const { session, spawnCalls } = await makeSession({ cwd: '/my/project', model: 'gpt-5.5' }, [
+      fake,
+    ]);
+
+    const sendPromise = collect(session.send('Hello'));
+    fake.emitLine({ type: 'thread.started', thread_id: 'tid-model' });
+    fake.emitLine({ type: 'turn.completed' });
+    fake.emitClose(0);
+    await sendPromise;
+
+    const { args } = spawnCalls[0];
+    expect(args).toContain('-m');
+    expect(args).toContain('gpt-5.5');
+    expect(args.indexOf('-m')).toBeLessThan(args.indexOf('-'));
   });
 
   test('system prompt is written to stdin as synthesised payload', async () => {
@@ -389,9 +439,35 @@ describe('CodexSession: subsequent turn (resume)', () => {
     const { args } = spawnCalls[0];
     expect(args).toContain('resume');
     expect(args).toContain('thread-prev');
+    expect(args).toContain('--json');
+    expect(args).toContain('--skip-git-repo-check');
+    expect(args).toContain('-c');
+    expect(args).toContain('approval_policy="never"');
+    expect(args).not.toContain('--ask-for-approval');
+    expect(args).not.toContain('--sandbox');
     // Message passed as positional arg, not via stdin.
     expect(args).toContain('Continue');
     expect(args).not.toContain('-'); // stdin sentinel absent
+  });
+
+  test('resume turn forwards explicit model override to codex exec', async () => {
+    const fake = new FakeChildProcess();
+    const { session, spawnCalls } = await makeSession(
+      { resumeSessionId: 'thread-prev', model: 'gpt-5.5' },
+      [fake]
+    );
+
+    const sendPromise = collect(session.send('Continue'));
+    fake.emitLine({ type: 'thread.started', thread_id: 'thread-prev' });
+    fake.emitLine({ type: 'turn.completed' });
+    fake.emitClose(0);
+    await sendPromise;
+
+    const { args } = spawnCalls[0];
+    expect(args).toContain('resume');
+    expect(args).toContain('-m');
+    expect(args).toContain('gpt-5.5');
+    expect(args.indexOf('-m')).toBeLessThan(args.indexOf('thread-prev'));
   });
 
   test('session.id reflects resumeSessionId before first event', async () => {
@@ -442,6 +518,43 @@ describe('CodexSession: error handling', () => {
     const msgs = await sendPromise;
     const systemMsgs = msgs.filter((m) => m.role === 'system');
     expect(systemMsgs.some((m) => String(m.content).includes('exited with code 1'))).toBe(true);
+  });
+
+  test('non-zero exit code includes stderr when no provider error was emitted', async () => {
+    const fake = new FakeChildProcess();
+    const { session } = await makeSession({}, [fake]);
+
+    const sendPromise = collect(session.send('Hello'));
+    fake.emitLine({ type: 'thread.started', thread_id: 'tid-stderr' });
+    fake.emitStderr('bad flag');
+    fake.emitClose(1);
+
+    const msgs = await sendPromise;
+    const systemMsgs = msgs.filter((m) => m.role === 'system');
+    expect(systemMsgs.some((m) => String(m.content).includes('bad flag'))).toBe(true);
+  });
+
+  test('non-zero exit code does not mask provider error details', async () => {
+    const fake = new FakeChildProcess();
+    const { session } = await makeSession({}, [fake]);
+
+    const sendPromise = collect(session.send('Hello'));
+    fake.emitLine({ type: 'thread.started', thread_id: 'tid-provider-error' });
+    fake.emitLine({
+      type: 'error',
+      message:
+        '{"type":"error","status":400,"error":{"message":"The default model is not supported"}}',
+    });
+    fake.emitLine({
+      type: 'turn.failed',
+      error: { message: 'The default model is not supported' },
+    });
+    fake.emitClose(1);
+
+    const msgs = await sendPromise;
+    const systemTexts = msgs.filter((m) => m.role === 'system').map((m) => String(m.content));
+    expect(systemTexts.some((text) => text.includes('default model'))).toBe(true);
+    expect(systemTexts.some((text) => text.includes('exited with code 1'))).toBe(false);
   });
 
   test('process spawn error yields system message without throwing', async () => {
@@ -509,6 +622,19 @@ describe('CodexSession: close', () => {
 
     expect(session.close()).resolves.toBeUndefined();
     expect(session.close()).resolves.toBeUndefined();
+  });
+
+  test('close() terminates an in-flight codex process', async () => {
+    const fake = new FakeChildProcess();
+    const { session } = await makeSession({}, [fake]);
+
+    const sendPromise = collect(session.send('Long running request'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    await session.close();
+    await sendPromise;
+
+    expect(fake.killedWith).toContain('SIGTERM');
   });
 });
 
