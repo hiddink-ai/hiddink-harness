@@ -197,4 +197,63 @@ describe('ChatPanel visible message filtering', () => {
       true
     );
   });
+
+  // --- content-block array cases ---
+
+  test('hides system message with content-block array containing only an empty text block', () => {
+    expect(isDisplayableMessage({ role: 'system', content: [{ type: 'text', text: '' }] })).toBe(
+      false
+    );
+  });
+
+  test('hides system message with content-block array containing only a whitespace text block', () => {
+    expect(isDisplayableMessage({ role: 'system', content: [{ type: 'text', text: '   ' }] })).toBe(
+      false
+    );
+  });
+
+  test('keeps system message with content-block array containing real error text', () => {
+    expect(
+      isDisplayableMessage({ role: 'system', content: [{ type: 'text', text: 'real error' }] })
+    ).toBe(true);
+  });
+
+  test('keeps assistant message with empty content array (assistant is always displayable)', () => {
+    // isDisplayableMessage only suppresses role==='system' with blank content;
+    // assistant messages are always shown regardless of content shape.
+    expect(isDisplayableMessage({ role: 'assistant', content: [] })).toBe(true);
+  });
+
+  test('keeps system message with a tool_use content block (non-text actionable block counts)', () => {
+    // contentToText maps tool_use → '[tool:bash]' which is non-empty after trim
+    expect(
+      isDisplayableMessage({
+        role: 'system',
+        content: [{ type: 'tool_use', toolName: 'bash' }],
+      })
+    ).toBe(true);
+  });
+});
+
+describe('ChatPanel stripShortcutSequences — robustness against mixed/repeated sequences', () => {
+  const ESC = String.fromCharCode(27);
+
+  test('strips two consecutive enhanced CSI sequences in one input', () => {
+    // '[49;10u' and '[50;10u' are adjacent — both must be removed, leaving 'abc'
+    expect(stripShortcutSequences(`a${ESC}[49;10ub${ESC}[50;10uc`)).toBe('abc');
+  });
+
+  test('strips mixed Meta-number and Meta-symbol sequences in one input', () => {
+    // ESC+'1' (Meta-number, stripped by ESC_SHIFTED_SHORTCUT_RE) and ESC+'!' (Meta-symbol, same RE)
+    expect(stripShortcutSequences(`pre${ESC}1mid${ESC}!post`)).toBe('premidpost');
+  });
+
+  test('strips CSI 27-variant sequence (literal bracket without ESC prefix)', () => {
+    // '[27;10;49~' matches the literal \[\d+;\d+;\d+~ replacement pass
+    expect(stripShortcutSequences('[27;10;49~clean')).toBe('clean');
+  });
+
+  test('leaves plain text unchanged when no escape sequences are present', () => {
+    expect(stripShortcutSequences('safe-text')).toBe('safe-text');
+  });
 });

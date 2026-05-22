@@ -791,3 +791,220 @@ describe('[10] Session persistence — saveSession / loadSession round-trip', ()
     expect(roles).toContain('assistant');
   });
 });
+
+// ===========================================================================
+// [11] Error recovery — failed turn does not poison subsequent turns
+// ===========================================================================
+
+describe('[11] Error recovery — failed turn does not poison subsequent turns', () => {
+  it('Scenario A (claude / persistent-bidirectional): second turn yields assistant after first turn yields system', async () => {
+    const hub = new ConversationHub({ sessionId: 'int-recovery-claude', cwd: '/tmp' });
+
+    // The session yields a system message on the first call, then an assistant message on the
+    // second call.  Because the session is the same object (persistent-bidirectional), the Hub
+    // must NOT clear it from activeSessions after a system yield — that would cause a re-spawn.
+    let callCount = 0;
+    const recoveringSession: ChatSession = {
+      id: 'claude-recover-1',
+      provider: 'claude',
+      async *send(_msg: string): AsyncIterable<NormalizedMessage> {
+        callCount++;
+        if (callCount === 1) {
+          yield makeMsg('system', 'Process exited unexpectedly');
+        } else {
+          yield makeMsg('assistant', 'Recovered reply');
+        }
+      },
+      close: mock(async () => {}),
+    };
+
+    const adapter: ProviderAdapter = {
+      id: 'claude',
+      lifecycle: 'persistent-bidirectional',
+      isAvailable: mock(async () => true),
+      spawn: mock(async (_opts: SpawnOptions) => recoveringSession),
+    };
+    hub.registerAdapter(adapter);
+
+    // Turn 1 — system error message
+    const turn1 = await collect(hub.sendTo('claude', 'first question'));
+    expect(turn1[0].role).toBe('system');
+
+    // Turn 2 — must succeed; spawn() called only once (persistent session reused)
+    const turn2 = await collect(hub.sendTo('claude', 'second question'));
+    expect(turn2[0].role).toBe('assistant');
+    expect(String(turn2[0].content)).toContain('Recovered reply');
+
+    // persistent-bidirectional: spawn() called exactly once regardless of system error in turn 1
+    expect((adapter.spawn as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+  });
+
+  it('Scenario B (codex / per-turn-resume): second turn preserves resumeSessionId from first errored turn', async () => {
+    const hub = new ConversationHub({ sessionId: 'int-recovery-codex', cwd: '/tmp' });
+
+    // First session yields a system (error) message; its id must still be stored as
+    // lastThreadId so the second spawn carries it as resumeSessionId.
+    const errorSession = makeSession('codex-err-001', 'codex', [
+      makeMsg('system', 'Codex exited with code 1'),
+    ]);
+    const okSession = makeSession('codex-ok-002', 'codex', [makeMsg('assistant', 'Turn 2 ok')]);
+    const adapter = makeAdapter('codex', 'per-turn-resume', [errorSession, okSession]);
+    hub.registerAdapter(adapter);
+
+    // Turn 1 — should yield a system message (not throw)
+    const turn1 = await collect(hub.sendTo('codex', 'Q1'));
+    expect(turn1[0].role).toBe('system');
+
+    // Turn 2 — should yield an assistant message
+    const turn2 = await collect(hub.sendTo('codex', 'Q2'));
+    expect(turn2[0].role).toBe('assistant');
+
+    // spawn() called twice (per-turn lifecycle always spawns fresh)
+    expect((adapter.spawn as ReturnType<typeof mock>).mock.calls).toHaveLength(2);
+
+    // The second spawn must carry the first session's id as resumeSessionId
+    // (recovery preserves the thread chain even when turn 1 errored)
+    const secondOpts = (adapter.spawn as ReturnType<typeof mock>).mock.calls[1][0] as SpawnOptions;
+    expect(secondOpts.resumeSessionId).toBe('codex-err-001');
+  });
+});
+
+// ===========================================================================
+// [12] Triple-turn streaming — repeated send stability
+// ===========================================================================
+
+describe('[12] Triple-turn streaming — repeated send stability', () => {
+  it('claude (persistent-bidirectional): 3 sequential turns all yield assistant content, spawn() called once', async () => {
+    const hub = new ConversationHub({ sessionId: 'int-triple-claude', cwd: '/tmp' });
+
+    let turnIndex = 0;
+    const persistentSession: ChatSession = {
+      id: 'claude-triple-1',
+      provider: 'claude',
+      async *send(_msg: string): AsyncIterable<NormalizedMessage> {
+        turnIndex++;
+        yield makeMsg('assistant', `Claude turn ${turnIndex}`);
+      },
+      close: mock(async () => {}),
+    };
+
+    const adapter: ProviderAdapter = {
+      id: 'claude',
+      lifecycle: 'persistent-bidirectional',
+      isAvailable: mock(async () => true),
+      spawn: mock(async (_opts: SpawnOptions) => persistentSession),
+    };
+    hub.registerAdapter(adapter);
+
+    const t1 = await collect(hub.sendTo('claude', 'Q1'));
+    const t2 = await collect(hub.sendTo('claude', 'Q2'));
+    const t3 = await collect(hub.sendTo('claude', 'Q3'));
+
+    expect(t1[0].role).toBe('assistant');
+    expect(t2[0].role).toBe('assistant');
+    expect(t3[0].role).toBe('assistant');
+
+    // Persistent session must never be re-spawned
+    expect((adapter.spawn as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+  });
+
+  it('codex (per-turn-resume): 3 sequential turns, spawn() called 3 times, each session.close() called once', async () => {
+    const hub = new ConversationHub({ sessionId: 'int-triple-codex', cwd: '/tmp' });
+
+    const s1 = makeSession('cx-trip-1', 'codex', [makeMsg('assistant', 'Reply 1')]);
+    const s2 = makeSession('cx-trip-2', 'codex', [makeMsg('assistant', 'Reply 2')]);
+    const s3 = makeSession('cx-trip-3', 'codex', [makeMsg('assistant', 'Reply 3')]);
+    const adapter = makeAdapter('codex', 'per-turn-resume', [s1, s2, s3]);
+    hub.registerAdapter(adapter);
+
+    await collect(hub.sendTo('codex', 'Q1'));
+    await collect(hub.sendTo('codex', 'Q2'));
+    await collect(hub.sendTo('codex', 'Q3'));
+
+    // Each turn spawns a fresh session
+    expect((adapter.spawn as ReturnType<typeof mock>).mock.calls).toHaveLength(3);
+
+    // Each session is closed exactly once after its turn
+    expect((s1.close as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+    expect((s2.close as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+    expect((s3.close as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+
+    // Thread chain: turn 2 carries s1.id, turn 3 carries s2.id
+    const opts = (adapter.spawn as ReturnType<typeof mock>).mock.calls as SpawnOptions[][];
+    expect((opts[1][0] as SpawnOptions).resumeSessionId).toBe('cx-trip-1');
+    expect((opts[2][0] as SpawnOptions).resumeSessionId).toBe('cx-trip-2');
+  });
+});
+
+// ===========================================================================
+// [13] Cross-provider turn interleaving — state isolation
+// ===========================================================================
+
+describe('[13] Cross-provider turn interleaving — state isolation', () => {
+  it('routes each turn to the correct provider and captures their spawn opts independently', async () => {
+    const hub = new ConversationHub({ sessionId: 'int-interleave', cwd: '/tmp' });
+
+    const claudeSpawnOpts: SpawnOptions[] = [];
+    const codexSpawnOpts: SpawnOptions[] = [];
+
+    // claude — persistent-bidirectional: spawned once, reused for the third turn
+    const claudeSession: ChatSession = {
+      id: 'cl-interleave-1',
+      provider: 'claude',
+      async *send(_msg: string): AsyncIterable<NormalizedMessage> {
+        yield makeMsg('assistant', 'claude reply');
+      },
+      close: mock(async () => {}),
+    };
+    const claudeAdapter: ProviderAdapter = {
+      id: 'claude',
+      lifecycle: 'persistent-bidirectional',
+      isAvailable: mock(async () => true),
+      spawn: mock(async (opts: SpawnOptions) => {
+        claudeSpawnOpts.push(opts);
+        return claudeSession;
+      }),
+    };
+
+    // codex — per-turn-resume: spawned once for turn 2
+    const codexSession = makeSession('cx-interleave-1', 'codex', [
+      makeMsg('assistant', 'codex reply'),
+    ]);
+    const codexAdapter: ProviderAdapter = {
+      id: 'codex',
+      lifecycle: 'per-turn-resume',
+      isAvailable: mock(async () => true),
+      spawn: mock(async (opts: SpawnOptions) => {
+        codexSpawnOpts.push(opts);
+        return codexSession;
+      }),
+    };
+
+    hub.appendSystemContext('provider', 'CLAUDE_ONLY', 'claude');
+    hub.appendSystemContext('provider', 'CODEX_ONLY', 'codex');
+
+    hub.registerAdapter(claudeAdapter);
+    hub.registerAdapter(codexAdapter);
+
+    // Turn 1: claude
+    await collect(hub.sendTo('claude', 'Turn1-claude'));
+    // Turn 2: codex
+    await collect(hub.sendTo('codex', 'Turn2-codex'));
+    // Turn 3: claude (persistent session reused — no new spawn)
+    await collect(hub.sendTo('claude', 'Turn3-claude'));
+
+    // claude: persistent-bidirectional → spawn() called exactly once (turn 3 reuses session)
+    expect((claudeAdapter.spawn as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+    // codex: per-turn-resume → spawn() called once (for turn 2)
+    expect((codexAdapter.spawn as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+
+    // System prompt isolation contract from commit 588f7ce:
+    // claude spawn opts must contain CLAUDE_ONLY but never CODEX_ONLY
+    expect(claudeSpawnOpts[0].systemPrompt).toContain('CLAUDE_ONLY');
+    expect(claudeSpawnOpts[0].systemPrompt).not.toContain('CODEX_ONLY');
+
+    // codex spawn opts must contain CODEX_ONLY but never CLAUDE_ONLY
+    expect(codexSpawnOpts[0].systemPrompt).toContain('CODEX_ONLY');
+    expect(codexSpawnOpts[0].systemPrompt).not.toContain('CLAUDE_ONLY');
+  });
+});
