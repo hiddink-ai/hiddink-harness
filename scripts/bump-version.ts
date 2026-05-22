@@ -6,83 +6,76 @@
  *
  * Usage:
  *   bun scripts/bump-version.ts 0.0.4
- *   bun scripts/bump-version.ts patch   # 0.0.3 -> 0.0.4
- *   bun scripts/bump-version.ts minor   # 0.0.3 -> 0.1.0
- *   bun scripts/bump-version.ts major   # 0.0.3 -> 1.0.0
- *
- * Also invoked automatically by the npm "version" lifecycle hook
- * (see package.json scripts.version) so `npm version <x>` keeps both files
- * in sync without any manual step.
- *
- * Implementation note: version fields are patched via regex to preserve each
- * file's original formatting (inline arrays, whitespace style, etc.).
+ *   bun scripts/bump-version.ts patch
+ *   bun scripts/bump-version.ts minor
+ *   bun scripts/bump-version.ts major
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const ROOT = process.env.BUMP_VERSION_ROOT ?? resolve(import.meta.dir, '..');
-const PKG = resolve(ROOT, 'package.json');
-const MANIFEST = resolve(ROOT, 'templates', 'manifest.json');
+export type BumpKind = 'major' | 'minor' | 'patch';
 
-function readVersion(path: string): string {
-  const content = readFileSync(path, 'utf-8');
-  const match = content.match(/"version"\s*:\s*"([^"]+)"/);
-  if (!match) throw new Error(`No "version" field found in ${path}`);
-  return match[1];
+export function isSemver(s: string): boolean {
+  return /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(s);
 }
 
-function patchVersion(path: string, next: string): void {
-  const content = readFileSync(path, 'utf-8');
-  if (!/"version"\s*:\s*"[^"]+"/.test(content)) {
-    throw new Error(`Failed to patch version in ${path} — "version" field not found`);
-  }
-  const updated = content.replace(/"version"\s*:\s*"[^"]+"/, `"version": "${next}"`);
-  writeFileSync(path, updated);
-}
-
-function bump(current: string, kind: 'major' | 'minor' | 'patch'): string {
+export function bump(current: string, kind: BumpKind): string {
   const [maj, min, pat] = current.split('.').map((n) => Number.parseInt(n, 10));
   if (kind === 'major') return `${maj + 1}.0.0`;
   if (kind === 'minor') return `${maj}.${min + 1}.0`;
   return `${maj}.${min}.${pat + 1}`;
 }
 
-function isSemver(s: string): boolean {
-  return /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(s);
+export interface BumpResult {
+  previous: string;
+  next: string;
+  pkgPath: string;
+  manifestPath: string;
 }
 
-const arg = process.argv[2];
-if (!arg) {
-  console.error('usage: bun scripts/bump-version.ts <version|patch|minor|major>');
-  process.exit(2);
+export function bumpVersion(root: string, arg: string): BumpResult {
+  const pkgPath = resolve(root, 'package.json');
+  const manifestPath = resolve(root, 'templates', 'manifest.json');
+
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+  const currentPkg = String(pkg.version);
+
+  let next: string;
+  if (arg === 'major' || arg === 'minor' || arg === 'patch') {
+    next = bump(currentPkg, arg);
+  } else if (isSemver(arg)) {
+    next = arg;
+  } else {
+    throw new Error(`invalid version argument: ${arg}`);
+  }
+
+  pkg.version = next;
+  manifest.version = next;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  return { previous: currentPkg, next, pkgPath, manifestPath };
 }
 
-const currentPkg = readVersion(PKG);
-const currentManifest = readVersion(MANIFEST);
-
-if (currentPkg !== currentManifest) {
-  console.warn(
-    `warning: starting state already drifted (package.json=${currentPkg}, manifest=${currentManifest}). Both will be overwritten.`
-  );
+if (import.meta.main) {
+  const arg = process.argv[2];
+  if (!arg) {
+    console.error('usage: bun scripts/bump-version.ts <version|patch|minor|major>');
+    process.exit(2);
+  }
+  const root = process.env.BUMP_VERSION_ROOT ?? resolve(import.meta.dir, '..');
+  try {
+    const r = bumpVersion(root, arg);
+    console.log(`✓ version bumped: ${r.previous} → ${r.next}`);
+    console.log('  - package.json');
+    console.log('  - templates/manifest.json');
+    console.log('');
+    console.log(
+      `Next: git add package.json templates/manifest.json && git commit -m "chore(release): bump version to ${r.next}"`
+    );
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(2);
+  }
 }
-
-let next: string;
-if (arg === 'major' || arg === 'minor' || arg === 'patch') {
-  next = bump(currentPkg, arg);
-} else if (isSemver(arg)) {
-  next = arg;
-} else {
-  console.error(`invalid version argument: ${arg}`);
-  process.exit(2);
-}
-
-patchVersion(PKG, next);
-patchVersion(MANIFEST, next);
-
-console.log(`✓ version bumped: ${currentPkg} → ${next}`);
-console.log('  - package.json');
-console.log('  - templates/manifest.json');
-console.log('');
-console.log(
-  `Next: git add package.json templates/manifest.json && git commit -m "chore(release): bump version to ${next}"`
-);

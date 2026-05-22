@@ -1,39 +1,46 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { bump, bumpVersion, isSemver } from '../../../scripts/bump-version.ts';
 
-const SCRIPT = resolve(import.meta.dir, '..', '..', '..', 'scripts', 'bump-version.ts');
-
-function runIn(cwd: string, ...args: string[]) {
-  return spawnSync('bun', [SCRIPT, ...args], {
-    cwd,
-    encoding: 'utf-8',
-    env: { ...process.env, BUN_QUIET: '1', BUMP_VERSION_ROOT: cwd },
-  });
-}
-
-function seed(cwd: string, pkgVersion: string, manifestVersion: string) {
+function seed(root: string, pkgVersion: string, manifestVersion: string) {
   writeFileSync(
-    join(cwd, 'package.json'),
+    join(root, 'package.json'),
     `${JSON.stringify({ name: 't', version: pkgVersion }, null, 2)}\n`
   );
-  mkdirSync(join(cwd, 'templates'), { recursive: true });
+  mkdirSync(join(root, 'templates'), { recursive: true });
   writeFileSync(
-    join(cwd, 'templates', 'manifest.json'),
+    join(root, 'templates', 'manifest.json'),
     `${JSON.stringify({ version: manifestVersion }, null, 2)}\n`
   );
 }
 
-function readBoth(cwd: string) {
+function read(root: string) {
   return {
-    pkg: JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf-8')).version,
-    manifest: JSON.parse(readFileSync(join(cwd, 'templates', 'manifest.json'), 'utf-8')).version,
+    pkg: JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')).version,
+    manifest: JSON.parse(readFileSync(join(root, 'templates', 'manifest.json'), 'utf-8')).version,
   };
 }
 
-describe('scripts/bump-version.ts — atomic version sync', () => {
+describe('scripts/bump-version — pure helpers', () => {
+  it('isSemver accepts valid semver and rejects non-semver', () => {
+    expect(isSemver('0.0.1')).toBe(true);
+    expect(isSemver('10.20.30')).toBe(true);
+    expect(isSemver('1.2.3-beta.1')).toBe(true);
+    expect(isSemver('1.2')).toBe(false);
+    expect(isSemver('v1.2.3')).toBe(false);
+    expect(isSemver('patch')).toBe(false);
+  });
+
+  it('bump computes major/minor/patch correctly', () => {
+    expect(bump('0.0.2', 'patch')).toBe('0.0.3');
+    expect(bump('0.1.5', 'minor')).toBe('0.2.0');
+    expect(bump('1.2.3', 'major')).toBe('2.0.0');
+  });
+});
+
+describe('scripts/bump-version — bumpVersion writes both files atomically', () => {
   let work: string;
 
   beforeEach(() => {
@@ -44,58 +51,46 @@ describe('scripts/bump-version.ts — atomic version sync', () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  it('writes both package.json and templates/manifest.json to the exact semver argument', () => {
+  it('writes exact semver argument to both files', () => {
     seed(work, '0.0.2', '0.0.2');
-    const r = runIn(work, '1.2.3');
-    expect(r.status).toBe(0);
-    const v = readBoth(work);
-    expect(v.pkg).toBe('1.2.3');
-    expect(v.manifest).toBe('1.2.3');
+    const r = bumpVersion(work, '1.2.3');
+    expect(r.next).toBe('1.2.3');
+    expect(read(work)).toEqual({ pkg: '1.2.3', manifest: '1.2.3' });
   });
 
-  it('bumps patch when "patch" is passed', () => {
+  it('bumps patch keyword', () => {
     seed(work, '0.0.2', '0.0.2');
-    const r = runIn(work, 'patch');
-    expect(r.status).toBe(0);
-    expect(readBoth(work)).toEqual({ pkg: '0.0.3', manifest: '0.0.3' });
+    bumpVersion(work, 'patch');
+    expect(read(work)).toEqual({ pkg: '0.0.3', manifest: '0.0.3' });
   });
 
-  it('bumps minor when "minor" is passed (resets patch)', () => {
+  it('bumps minor keyword and resets patch', () => {
     seed(work, '0.1.5', '0.1.5');
-    const r = runIn(work, 'minor');
-    expect(r.status).toBe(0);
-    expect(readBoth(work)).toEqual({ pkg: '0.2.0', manifest: '0.2.0' });
+    bumpVersion(work, 'minor');
+    expect(read(work)).toEqual({ pkg: '0.2.0', manifest: '0.2.0' });
   });
 
-  it('bumps major when "major" is passed (resets minor and patch)', () => {
+  it('bumps major keyword and resets minor/patch', () => {
     seed(work, '1.2.3', '1.2.3');
-    const r = runIn(work, 'major');
-    expect(r.status).toBe(0);
-    expect(readBoth(work)).toEqual({ pkg: '2.0.0', manifest: '2.0.0' });
+    bumpVersion(work, 'major');
+    expect(read(work)).toEqual({ pkg: '2.0.0', manifest: '2.0.0' });
   });
 
-  it('exits non-zero when no argument is supplied', () => {
+  it('throws on invalid argument', () => {
     seed(work, '0.0.2', '0.0.2');
-    const r = runIn(work);
-    expect(r.status).not.toBe(0);
-  });
-
-  it('exits non-zero when argument is neither semver nor keyword', () => {
-    seed(work, '0.0.2', '0.0.2');
-    const r = runIn(work, 'not-a-version');
-    expect(r.status).not.toBe(0);
+    expect(() => bumpVersion(work, 'not-a-version')).toThrow(/invalid version/);
   });
 
   it('overwrites both files even when starting state has drift (recovery path)', () => {
     seed(work, '0.0.3', '0.0.2');
-    const r = runIn(work, '0.0.4');
-    expect(r.status).toBe(0);
-    expect(readBoth(work)).toEqual({ pkg: '0.0.4', manifest: '0.0.4' });
+    bumpVersion(work, '0.0.4');
+    expect(read(work)).toEqual({ pkg: '0.0.4', manifest: '0.0.4' });
   });
 
-  it('prints next-step guidance with the new version', () => {
+  it('returns previous and next versions', () => {
     seed(work, '0.0.2', '0.0.2');
-    const r = runIn(work, '0.0.3');
-    expect(r.stdout).toContain('bump version to 0.0.3');
+    const r = bumpVersion(work, '0.0.3');
+    expect(r.previous).toBe('0.0.2');
+    expect(r.next).toBe('0.0.3');
   });
 });
