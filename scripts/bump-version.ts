@@ -20,8 +20,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const PKG = resolve(import.meta.dir, '..', 'package.json');
-const MANIFEST = resolve(import.meta.dir, '..', 'templates', 'manifest.json');
+const ROOT = process.env.BUMP_VERSION_ROOT ?? resolve(import.meta.dir, '..');
+const PKG = resolve(ROOT, 'package.json');
+const MANIFEST = resolve(ROOT, 'templates', 'manifest.json');
 
 function readVersion(path: string): string {
   const content = readFileSync(path, 'utf-8');
@@ -82,4 +83,6 @@ console.log(`✓ version bumped: ${currentPkg} → ${next}`);
 console.log('  - package.json');
 console.log('  - templates/manifest.json');
 console.log('');
-console.log('Next: git add package.json templates/manifest.json && git commit -m "chore(release): bump version to ' + next + '"');
+console.log(
+  `Next: git add package.json templates/manifest.json && git commit -m "chore(release): bump version to ${next}"`
+);
