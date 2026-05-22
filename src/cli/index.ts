@@ -55,7 +55,15 @@ export function createProgram(): Command {
       const React = await import('react');
       const { HiddinkTuiDashboard } = await import('./ui/Dashboard.js');
 
-      render(React.createElement(HiddinkTuiDashboard, { cwd }));
+      // Batch Ink renders into a single frame to reduce flicker
+      process.env.INK_FLUSH_BUFFERED_RENDERS = '1';
+
+      const app = render(React.createElement(HiddinkTuiDashboard, { cwd }), {
+        patchConsole: false,
+        exitOnCtrlC: true,
+      });
+
+      await app.waitUntilExit();
     });
 
   // hiddink-harness list [type] [--format table|json|simple]

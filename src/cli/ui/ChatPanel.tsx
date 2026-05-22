@@ -13,8 +13,8 @@
 
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type { FC } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ConversationHub } from '../../core/hub.js';
 import type { NormalizedMessage, ProviderId } from '../../core/providers/types.js';
 
@@ -22,9 +22,14 @@ import type { NormalizedMessage, ProviderId } from '../../core/providers/types.j
 // Types
 // ---------------------------------------------------------------------------
 
+type SlashCommand = 'sessions' | 'rag' | 'settings' | 'talk' | 'exit' | 'help';
+
+const SLASH_COMMANDS: SlashCommand[] = ['sessions', 'rag', 'settings', 'talk', 'exit', 'help'];
+
 interface ChatPanelProps {
   hub: ConversationHub;
   cwd: string;
+  onCommand?: (cmd: SlashCommand) => void;
 }
 
 interface DisplayMessage extends NormalizedMessage {
@@ -65,13 +70,88 @@ const ROLE_PREFIX: Record<string, string> = {
 };
 
 /** 화면에 표시할 최대 메시지 수 (터미널 높이 보호) */
-const MAX_VISIBLE_MESSAGES = 8;
+const MAX_VISIBLE_MESSAGES = 10;
+
+// ---------------------------------------------------------------------------
+// MessageLine — memoized single-message renderer to prevent re-render of
+// already-rendered messages while the user is typing or streaming.
+// ---------------------------------------------------------------------------
+
+const MessageLine = memo<{ msg: DisplayMessage }>(({ msg }) => {
+  const color = ROLE_COLORS[msg.role] ?? 'white';
+  const prefix = ROLE_PREFIX[msg.role] ?? msg.role.toUpperCase();
+  const contentStr =
+    typeof msg.content === 'string' ? msg.content : msg.content.map((b) => b.text ?? '').join('');
+  // 긴 메시지는 첫 3줄만 표시
+  const lines = contentStr.split('\n').slice(0, 3);
+  const display = lines.join(' ↵ ') + (contentStr.split('\n').length > 3 ? ' …' : '');
+
+  return (
+    <Box flexDirection="row" marginBottom={0}>
+      <Text color={color} bold>
+        {prefix}:{' '}
+      </Text>
+      <Text color={color} wrap="truncate">
+        {display}
+      </Text>
+    </Box>
+  );
+});
+MessageLine.displayName = 'MessageLine';
+
+// ---------------------------------------------------------------------------
+// ProviderBar — memoized so provider list doesn't re-render on every keystroke
+// ---------------------------------------------------------------------------
+
+const ProviderBar = memo<{
+  provider: ProviderId;
+  availableProviders: ProviderId[];
+}>(({ provider, availableProviders }) => (
+  <Box flexDirection="row" marginBottom={1}>
+    {(Object.keys(PROVIDER_LABELS) as ProviderId[]).map((pid) => {
+      const isAgy = pid === 'agy';
+      const isActive = pid === provider;
+      const isAvail = availableProviders.includes(pid);
+      let color: string;
+      if (isAgy) color = 'gray';
+      else if (isActive) color = 'cyan';
+      else if (isAvail) color = 'white';
+      else color = 'gray';
+      return (
+        <Box key={pid} marginRight={1}>
+          <Text
+            color={color}
+            bold={isActive}
+            inverse={isActive}
+            dimColor={isAgy || (!isAvail && !isAgy)}
+          >
+            {' '}
+            {PROVIDER_LABELS[pid]}
+            {isAgy ? '(disabled)' : !isAvail ? '(unavail)' : ''}{' '}
+          </Text>
+        </Box>
+      );
+    })}
+  </Box>
+));
+ProviderBar.displayName = 'ProviderBar';
+
+// ---------------------------------------------------------------------------
+// KeyHints — static help text, never re-renders
+// ---------------------------------------------------------------------------
+
+const KeyHints = memo(() => (
+  <Text color="gray" dimColor>
+    /sessions /rag /settings /talk /exit (슬래시 명령) · [1-3] provider · [Tab] 입력 포커스
+  </Text>
+));
+KeyHints.displayName = 'KeyHints';
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
+export const ChatPanel: FC<ChatPanelProps> = ({ hub, cwd: _cwd, onCommand }) => {
   const [provider, setProvider] = useState<ProviderId>('claude');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -95,16 +175,40 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
   // ---------------------------------------------------------------------------
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect — provider/setProvider/setStatusLine are stable refs, re-running on their changes would reset availability mid-session
   useEffect(() => {
-    hub.listAvailable().then((list) => {
-      setAvailableProviders(list);
-      // 기본 provider가 사용 불가능하면 첫 번째 사용 가능한 것으로 교체
-      if (list.length > 0 && !list.includes(provider)) {
-        setProvider(list[0]);
+    let cancelled = false;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 8; // 8 × 250ms = 2s 최대 대기
+    const INTERVAL_MS = 250;
+
+    const poll = async () => {
+      while (!cancelled && attempt < MAX_ATTEMPTS) {
+        attempt++;
+        try {
+          const list = await hub.listAvailable();
+          if (list.length > 0) {
+            if (!cancelled) {
+              setAvailableProviders(list);
+              if (!list.includes(provider)) {
+                setProvider(list[0]);
+              }
+              setStatusLine(`준비. ${list.length}개 provider 사용 가능.`);
+            }
+            return;
+          }
+        } catch {
+          // 무시하고 재시도
+        }
+        await new Promise<void>((r) => setTimeout(r, INTERVAL_MS));
       }
-      if (list.length === 0) {
+      if (!cancelled) {
         setStatusLine('사용 가능한 provider 없음. binary를 설치하세요.');
       }
-    });
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+    };
   }, [hub]);
 
   // ---------------------------------------------------------------------------
@@ -223,7 +327,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
           setStatusLine(`Provider 전환 → ${newProvider}`);
         }
       }
-      if (key.tab || inputChar === 'i') {
+      if (key.tab) {
         setInputFocused(true);
       }
     },
@@ -235,85 +339,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
   // ---------------------------------------------------------------------------
   const visibleMessages = messages.slice(-MAX_VISIBLE_MESSAGES);
 
-  const renderProviderBar = () => (
-    <Box flexDirection="row" marginBottom={1}>
-      {(Object.keys(PROVIDER_LABELS) as ProviderId[]).map((pid) => {
-        const isAgy = pid === 'agy';
-        const isActive = pid === provider;
-        const isAvail = availableProviders.includes(pid);
-
-        let color: string;
-        if (isAgy) color = 'gray';
-        else if (isActive) color = 'cyan';
-        else if (isAvail) color = 'white';
-        else color = 'gray';
-
-        return (
-          <Box key={pid} marginRight={1}>
-            <Text
-              color={color}
-              bold={isActive}
-              inverse={isActive}
-              dimColor={isAgy || (!isAvail && !isAgy)}
-            >
-              {' '}
-              {PROVIDER_LABELS[pid]}
-              {isAgy ? '(disabled)' : !isAvail ? '(unavail)' : ''}{' '}
-            </Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-
-  const renderMessages = () => (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="gray"
-      paddingLeft={1}
-      paddingRight={1}
-      height={12}
-    >
-      {visibleMessages.length === 0 ? (
-        <Text color="gray" dimColor>
-          대화를 시작해보세요. 메시지를 입력하고 Enter를 누르세요.
-        </Text>
-      ) : (
-        visibleMessages.map((msg) => {
-          const color = ROLE_COLORS[msg.role] ?? 'white';
-          const prefix = ROLE_PREFIX[msg.role] ?? msg.role.toUpperCase();
-          const contentStr =
-            typeof msg.content === 'string'
-              ? msg.content
-              : msg.content.map((b) => b.text ?? '').join('');
-          // 긴 메시지는 첫 3줄만 표시
-          const lines = contentStr.split('\n').slice(0, 3);
-          const display = lines.join(' ↵ ') + (contentStr.split('\n').length > 3 ? ' …' : '');
-
-          return (
-            <Box key={msg._displayId} flexDirection="row" marginBottom={0}>
-              <Text color={color} bold>
-                {prefix}:{' '}
-              </Text>
-              <Text color={color} wrap="truncate">
-                {display}
-              </Text>
-            </Box>
-          );
-        })
-      )}
-    </Box>
-  );
+  const renderMessages = () => {
+    if (visibleMessages.length === 0) {
+      return (
+        <Box flexDirection="column" flexGrow={1}>
+          <Text color="gray" dimColor>
+            대화를 시작해보세요. 메시지를 입력하고 Enter를 누르세요.
+          </Text>
+        </Box>
+      );
+    }
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        {visibleMessages.map((msg) => (
+          <MessageLine key={msg._displayId} msg={msg} />
+        ))}
+      </Box>
+    );
+  };
 
   const renderInput = () => (
-    <Box
-      flexDirection="row"
-      borderStyle="single"
-      borderColor={inputFocused ? 'cyan' : 'gray'}
-      paddingLeft={1}
-      marginTop={1}
-    >
+    <Box flexDirection="row" paddingLeft={1} marginTop={1}>
       <Text color="cyan" bold>
         {'>'}
       </Text>
@@ -327,12 +373,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
           value={input}
           onChange={setInput}
           onSubmit={(val) => {
-            if (val.trim()) {
-              sendMessage(val);
+            const trimmed = val.trim();
+            if (!trimmed) return;
+            if (trimmed.startsWith('/')) {
+              const cmd = trimmed.slice(1).toLowerCase();
+              setInput('');
+              if ((SLASH_COMMANDS as string[]).includes(cmd)) {
+                if (cmd === 'help') {
+                  setStatusLine('명령어: /sessions /rag /settings /talk /exit');
+                } else {
+                  onCommand?.(cmd as SlashCommand);
+                }
+              } else {
+                setStatusLine(`알 수 없는 명령: ${trimmed}. /help로 도움말 확인`);
+              }
+              return;
             }
+            sendMessage(trimmed);
           }}
           focus={inputFocused && !streaming}
-          placeholder="메시지를 입력하세요..."
+          placeholder="메시지 또는 슬래시 명령(/help)"
         />
       )}
     </Box>
@@ -352,9 +412,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
   // Render
   // ---------------------------------------------------------------------------
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexGrow={1}>
       {/* Provider 선택 바 */}
-      {renderProviderBar()}
+      <ProviderBar provider={provider} availableProviders={availableProviders} />
 
       {/* 메시지 히스토리 */}
       {renderMessages()}
@@ -370,9 +430,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ hub, cwd: _cwd }) => {
         <Text color="gray" dimColor>
           {statusLine}
         </Text>
-        <Text color="gray" dimColor>
-          [1-3]provider전환 [Tab/i]입력포커스 [ESC]취소
-        </Text>
+        <KeyHints />
       </Box>
     </Box>
   );
