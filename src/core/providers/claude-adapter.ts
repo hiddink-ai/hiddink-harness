@@ -1,12 +1,16 @@
 /**
  * Claude CLI adapter — persistent-bidirectional stream-json provider.
  *
- * Spawns: claude -p "" --bare --input-format stream-json --output-format stream-json
+ * Spawns: claude -p "" --verbose --input-format stream-json --output-format stream-json
  *           --include-partial-messages --include-hook-events
  *           --permission-mode bypassPermissions
  *           --allowedTools "Read,Write,Edit,Bash,Glob,Grep"
  *           --session-id <uuid>  [--resume <id>]
- *           --cwd <cwd>
+ *           (cwd는 spawn options으로 전달, CLI flag 아님)
+ *
+ * Note: --verbose is required when using --output-format=stream-json with -p (claude CLI 2.1.147+).
+ * Do not pass --bare here: it disables OAuth/keychain auth and makes a locally
+ * logged-in Claude CLI look unauthenticated.
  *
  * Session init event: {type:"system", subtype:"init", session_id:"...", ...}
  *
@@ -31,6 +35,17 @@ import type {
 // Lazy-bound to avoid module-level side effects from promisify(execFile)
 // that interfere with bun:test's stream event dispatch.
 const execFileAsync = promisify(execFile);
+
+const CLAUDE_CLI_MODEL_ALIASES: Record<string, string> = {
+  // UI-facing labels stay version-shaped, but Claude Code currently accepts
+  // the stable aliases or full model IDs on --model.
+  'sonnet-4.7': 'sonnet',
+  'opus-4.7': 'opus',
+};
+
+function resolveClaudeCliModel(model: string): string {
+  return CLAUDE_CLI_MODEL_ALIASES[model] ?? model;
+}
 
 // ---------------------------------------------------------------------------
 // Claude JSONL event shapes (stdout)
@@ -80,6 +95,33 @@ interface StreamEvent {
   [key: string]: unknown;
 }
 
+interface ClaudeAssistantMessageEvent {
+  type: 'assistant';
+  message?: {
+    content?: Array<{
+      type?: string;
+      text?: string;
+      name?: string;
+      input?: unknown;
+      id?: string;
+      [key: string]: unknown;
+    }>;
+    model?: string;
+    [key: string]: unknown;
+  };
+  error?: string;
+  [key: string]: unknown;
+}
+
+interface ClaudeResultEvent {
+  type: 'result';
+  is_error?: boolean;
+  result?: string;
+  error?: string;
+  api_error_status?: number | null;
+  [key: string]: unknown;
+}
+
 interface PermissionRequestEvent {
   type: 'permission_request';
   [key: string]: unknown;
@@ -92,6 +134,14 @@ interface PermissionRequestEvent {
 export class ClaudeAdapter extends StreamJsonAdapterBase {
   readonly id: ProviderId = 'claude';
   readonly lifecycle: ProviderLifecycle = 'persistent-bidirectional';
+  protected override readonly waitForSessionInitBeforeSpawn = false;
+
+  protected override getProvisionalSessionId(opts: SpawnOptions, command: SpawnCommand): string {
+    if (opts.resumeSessionId) return opts.resumeSessionId;
+    const sessionFlagIndex = command.args.indexOf('--session-id');
+    const sessionId = command.args[sessionFlagIndex + 1];
+    return typeof sessionId === 'string' ? sessionId : '';
+  }
 
   // -------------------------------------------------------------------------
   // isAvailable
@@ -125,7 +175,7 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
     const args: string[] = [
       '-p',
       '',
-      '--bare',
+      '--verbose', // required for --output-format=stream-json with -p (claude CLI 2.1.147+)
       '--input-format',
       'stream-json',
       '--output-format',
@@ -136,8 +186,6 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
       'bypassPermissions',
       '--allowedTools',
       allowedTools,
-      '--cwd',
-      opts.cwd,
     ];
 
     if (opts.resumeSessionId) {
@@ -147,7 +195,7 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
     }
 
     if (opts.model) {
-      args.push('--model', opts.model);
+      args.push('--model', resolveClaudeCliModel(opts.model));
     }
 
     return { cmd: 'claude', args };
@@ -163,12 +211,22 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
     const ev = event as Record<string, unknown>;
     const eventType = ev.type;
 
-    // system:init — consumed by extractSessionId, discard here.
-    if (eventType === 'system') return null;
+    // system:init and echoed user envelopes carry no assistant-visible text.
+    if (eventType === 'system' || eventType === 'user') return null;
+
+    // Claude Code emits rate-limit telemetry envelopes in stream-json mode.
+    if (eventType === 'rate_limit_event') return null;
 
     // stream_event wraps the Anthropic streaming API event envelope.
     if (eventType === 'stream_event') {
       return this.normalizeStreamEventInner(ev as StreamEvent);
+    }
+
+    // Claude Code 2.1.x emits completed assistant envelopes after partial
+    // stream_event deltas. Ignore normal envelopes to avoid duplicate text;
+    // only surface explicit error envelopes.
+    if (eventType === 'assistant') {
+      return this.normalizeAssistantMessageError(ev as ClaudeAssistantMessageEvent);
     }
 
     // permission_request — bypassPermissions should suppress these, but
@@ -183,9 +241,18 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
       };
     }
 
-    // result event — final turn summary; discard.
+    // result event — final turn summary. Successful results are discarded
+    // because assistant content is emitted separately; error results are
+    // surfaced when no assistant envelope carried the text.
     if (eventType === 'result') {
-      return null;
+      const result = ev as ClaudeResultEvent;
+      if (!result.is_error) return null;
+      return {
+        role: 'system',
+        content: `[claude] ${result.result ?? result.error ?? 'provider error'}`,
+        timestamp: new Date().toISOString(),
+        providerMeta: { raw: result },
+      };
     }
 
     // Unrecognised event — preserve in providerMeta.
@@ -194,6 +261,32 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
       content: `[claude] unknown event type: ${String(eventType)}`,
       timestamp: new Date().toISOString(),
       providerMeta: { raw: ev },
+    };
+  }
+
+  private normalizeAssistantMessageError(
+    ev: ClaudeAssistantMessageEvent
+  ): NormalizedMessage | null {
+    if (!ev.error) return null;
+
+    const blocks = ev.message?.content;
+    const text = Array.isArray(blocks)
+      ? blocks
+          .map((block) =>
+            block.type === 'text' && typeof block.text === 'string' ? block.text : ''
+          )
+          .join('')
+          .trim()
+      : '';
+
+    return {
+      role: 'system',
+      content: `[claude] ${text || ev.error}`,
+      timestamp: new Date().toISOString(),
+      providerMeta: {
+        claudeModel: ev.message?.model,
+        claudeError: ev.error,
+      },
     };
   }
 
@@ -283,6 +376,12 @@ export class ClaudeAdapter extends StreamJsonAdapterBase {
     }
 
     return null;
+  }
+
+  override isTurnCompleteEvent(event: unknown): boolean {
+    return Boolean(
+      event && typeof event === 'object' && (event as Record<string, unknown>).type === 'result'
+    );
   }
 
   // -------------------------------------------------------------------------

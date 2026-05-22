@@ -171,11 +171,13 @@ describe('ClaudeAdapter', () => {
       expect(args).toContain('--input-format');
       expect(args).toContain('stream-json');
       expect(args).toContain('--output-format');
-      expect(args).toContain('--bare');
+      expect(args).not.toContain('--bare');
+      expect(args).toContain('--verbose');
       expect(args).toContain('--permission-mode');
       expect(args).toContain('bypassPermissions');
-      expect(args).toContain('--cwd');
-      expect(args).toContain('/workspace');
+      // --cwd is passed as spawn process option, not as a CLI flag
+      expect(args).not.toContain('--cwd');
+      expect(args).not.toContain('/workspace');
     });
 
     it('uses --session-id for a new session', () => {
@@ -200,6 +202,24 @@ describe('ClaudeAdapter', () => {
       const { args } = adapter.buildSpawnCommand(opts);
       expect(args).toContain('--model');
       expect(args).toContain('claude-3-5-sonnet');
+    });
+
+    it('maps UI model labels to Claude CLI model aliases', () => {
+      const adapter = new TestableClaudeAdapter();
+      const { args: sonnetArgs } = adapter.buildSpawnCommand({
+        ...SPAWN_OPTS,
+        model: 'sonnet-4.7',
+      });
+      const { args: opusArgs } = adapter.buildSpawnCommand({
+        ...SPAWN_OPTS,
+        model: 'opus-4.7',
+      });
+
+      expect(sonnetArgs).toContain('--model');
+      expect(sonnetArgs).toContain('sonnet');
+      expect(sonnetArgs).not.toContain('sonnet-4.7');
+      expect(opusArgs).toContain('opus');
+      expect(opusArgs).not.toContain('opus-4.7');
     });
 
     it('uses custom allowedTools', () => {
@@ -230,6 +250,14 @@ describe('ClaudeAdapter', () => {
     });
   });
 
+  describe('isTurnCompleteEvent()', () => {
+    it('treats result events as turn completion markers', () => {
+      const adapter = new TestableClaudeAdapter();
+      expect(adapter.isTurnCompleteEvent({ type: 'result' })).toBe(true);
+      expect(adapter.isTurnCompleteEvent({ type: 'assistant' })).toBe(false);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // normalizeStreamEvent
   // -----------------------------------------------------------------------
@@ -256,6 +284,48 @@ describe('ClaudeAdapter', () => {
       expect(blocks[0]?.type).toBe('text');
       expect(blocks[0]?.text).toBe('Hello!');
       expect(msg?.providerMeta?.streaming).toBe(true);
+    });
+
+    it('ignores normal Claude Code assistant envelopes to avoid duplicate streamed text', () => {
+      const adapter = new TestableClaudeAdapter();
+      const msg = adapter.normalizeStreamEvent({
+        type: 'assistant',
+        message: {
+          model: 'claude-sonnet-4-6',
+          content: [{ type: 'text', text: 'Hello from Claude.' }],
+        },
+      });
+
+      expect(msg).toBeNull();
+    });
+
+    it('normalizes Claude Code assistant error envelopes into system messages', () => {
+      const adapter = new TestableClaudeAdapter();
+      const msg = adapter.normalizeStreamEvent({
+        type: 'assistant',
+        error: 'model_not_found',
+        message: {
+          model: '<synthetic>',
+          content: [{ type: 'text', text: 'Model not found.' }],
+        },
+      });
+
+      expect(msg?.role).toBe('system');
+      expect(String(msg?.content)).toContain('Model not found');
+      expect(msg?.providerMeta?.claudeError).toBe('model_not_found');
+    });
+
+    it('normalizes error result summaries into system messages', () => {
+      const adapter = new TestableClaudeAdapter();
+      const msg = adapter.normalizeStreamEvent({
+        type: 'result',
+        is_error: true,
+        result: 'model not found',
+        api_error_status: 404,
+      });
+
+      expect(msg?.role).toBe('system');
+      expect(String(msg?.content)).toContain('model not found');
     });
 
     it('normalizes tool_use content_block_start into tool message', () => {

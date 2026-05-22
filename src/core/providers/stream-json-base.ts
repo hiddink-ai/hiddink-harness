@@ -24,6 +24,7 @@
 // Import both spawn and execFile from the same require() to avoid
 // bun:test async-context divergence when sub-modules import different symbols.
 import { type ChildProcess, spawn } from 'node:child_process';
+import { devLog } from '../../utils/dev-log.js';
 import type {
   ChatSession,
   NormalizedMessage,
@@ -188,6 +189,14 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
   abstract readonly id: ProviderId;
   abstract readonly lifecycle: ProviderLifecycle;
 
+  /**
+   * Some stream-json CLIs emit their init/session event only after the first
+   * JSONL user message is written. Claude Code 2.1.x behaves this way with
+   * `--input-format stream-json`, so adapters can opt out of blocking spawn()
+   * on the init event and let send() capture it instead.
+   */
+  protected readonly waitForSessionInitBeforeSpawn: boolean = true;
+
   abstract isAvailable(): Promise<boolean>;
 
   /**
@@ -215,6 +224,23 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
    */
   abstract extractSessionId(event: unknown): string | null;
 
+  /**
+   * Return true for provider events that mark the current user turn complete
+   * while the process may remain alive for more JSONL input.
+   */
+  isTurnCompleteEvent(_event: unknown): boolean {
+    return false;
+  }
+
+  /**
+   * Session ID to expose before an init event arrives. Defaults to an explicit
+   * resume ID when present; adapters that create their own session ID in
+   * buildSpawnCommand() can override this.
+   */
+  protected getProvisionalSessionId(_opts: SpawnOptions, _command: SpawnCommand): string {
+    return _opts.resumeSessionId ?? '';
+  }
+
   // -------------------------------------------------------------------------
   // _spawn — replaceable in tests
   // -------------------------------------------------------------------------
@@ -237,7 +263,17 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
   // -------------------------------------------------------------------------
 
   async spawn(opts: SpawnOptions): Promise<ChatSession> {
-    const { cmd, args } = this.buildSpawnCommand(opts);
+    const command = this.buildSpawnCommand(opts);
+    const { cmd, args } = command;
+
+    devLog('provider.spawn', {
+      provider: this.id,
+      cmd,
+      args,
+      cwd: opts.cwd,
+      model: opts.model,
+      resumeSessionId: opts.resumeSessionId,
+    });
 
     const child = this._spawn(cmd, args, opts.cwd);
 
@@ -245,17 +281,23 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
     const stderrChunks: Buffer[] = [];
     child.stderr?.on('data', (chunk: Buffer) => {
       stderrChunks.push(chunk);
+      devLog('provider.stderr', {
+        provider: this.id,
+        text: chunk.toString('utf8').slice(0, 2000),
+      });
     });
 
     // -----------------------------------------------------------------------
     // Resolve session ID from the first init event on stdout.
     // -----------------------------------------------------------------------
-    let resolveSessionId!: (id: string) => void;
-    let rejectSessionId!: (err: Error) => void;
-    const sessionIdPromise = new Promise<string>((res, rej) => {
-      resolveSessionId = res;
-      rejectSessionId = rej;
-    });
+    let resolveSessionId: ((id: string) => void) | null = null;
+    let rejectSessionId: ((err: Error) => void) | null = null;
+    const sessionIdPromise = this.waitForSessionInitBeforeSpawn
+      ? new Promise<string>((res, rej) => {
+          resolveSessionId = res;
+          rejectSessionId = rej;
+        })
+      : null;
 
     const stdout = child.stdout;
     if (!stdout) {
@@ -264,7 +306,17 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
 
     // lineBuffer holds lines that arrive before send() is called.
     const lineBuffer: string[] = [];
+    let sessionId = this.getProvisionalSessionId(opts, command);
     let sessionIdResolved = false;
+
+    const captureSessionId = (extractedId: string): void => {
+      sessionId = extractedId;
+      devLog('provider.session_id', { provider: this.id, sessionId: extractedId });
+      if (!sessionIdResolved) {
+        sessionIdResolved = true;
+        resolveSessionId?.(extractedId);
+      }
+    };
 
     // Single reader for the entire session lifetime.  send() will call
     // reader.setLineHandler() to route subsequent lines to the iterator.
@@ -277,8 +329,7 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
             const parsed: unknown = JSON.parse(line);
             const extractedId = this.extractSessionId(parsed);
             if (extractedId !== null) {
-              sessionIdResolved = true;
-              resolveSessionId(extractedId);
+              captureSessionId(extractedId);
             }
           } catch {
             // Not JSON or not init event — fall through.
@@ -288,9 +339,9 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
       },
       // onClose: only reject if session ID was never resolved.
       () => {
-        if (!sessionIdResolved) {
+        if (this.waitForSessionInitBeforeSpawn && !sessionIdResolved) {
           const stderr = Buffer.concat(stderrChunks).toString().trim();
-          rejectSessionId(
+          rejectSessionId?.(
             new Error(
               `${this.id} subprocess exited before emitting session ID.${stderr ? ` stderr: ${stderr}` : ''}`
             )
@@ -300,33 +351,41 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
     );
 
     child.on('error', (err) => {
-      if (!sessionIdResolved) {
-        rejectSessionId(err);
+      devLog('provider.process_error', { provider: this.id, error: err });
+      if (this.waitForSessionInitBeforeSpawn && !sessionIdResolved) {
+        rejectSessionId?.(err);
       }
     });
 
     // When the child exits, notify the reader so it can flush and trigger onClose.
     // This replaces stream.on('end'/'close') which has async-context issues in bun:test.
     child.once('exit', () => {
+      devLog('provider.exit', {
+        provider: this.id,
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+      });
       reader.notifyEnd();
     });
 
-    // Wait for session ID with a reasonable timeout.
-    let sessionId: string;
-    try {
-      sessionId = await Promise.race([
-        sessionIdPromise,
-        new Promise<string>((_, rej) =>
-          setTimeout(
-            () => rej(new Error(`${this.id} timed out waiting for session init event (10 s)`)),
-            10_000
-          )
-        ),
-      ]);
-    } catch (err) {
-      reader.close();
-      await terminateProcess(child);
-      throw err;
+    if (this.waitForSessionInitBeforeSpawn) {
+      // Wait for session ID with a reasonable timeout.
+      try {
+        sessionId = await Promise.race([
+          // biome-ignore lint/style/noNonNullAssertion: created when waitForSessionInitBeforeSpawn is true
+          sessionIdPromise!,
+          new Promise<string>((_, rej) =>
+            setTimeout(
+              () => rej(new Error(`${this.id} timed out waiting for session init event (10 s)`)),
+              10_000
+            )
+          ),
+        ]);
+      } catch (err) {
+        reader.close();
+        await terminateProcess(child);
+        throw err;
+      }
     }
 
     const provider = this.id;
@@ -336,7 +395,9 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
     // Build the ChatSession
     // -----------------------------------------------------------------------
     const session: ChatSession = {
-      id: sessionId,
+      get id(): string {
+        return sessionId;
+      },
       provider,
 
       send(message: string): AsyncIterable<NormalizedMessage> {
@@ -352,7 +413,8 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
               message,
               adapter,
               () => closed,
-              stderrChunks
+              stderrChunks,
+              captureSessionId
             );
           },
         };
@@ -361,6 +423,7 @@ export abstract class StreamJsonAdapterBase implements ProviderAdapter {
       async close(): Promise<void> {
         if (closed) return;
         closed = true;
+        devLog('provider.session_close', { provider, sessionId });
         reader.close();
         await terminateProcess(child);
       },
@@ -384,7 +447,8 @@ function createMessageIterator(
   message: string,
   adapter: StreamJsonAdapterBase,
   isClosed: () => boolean,
-  stderrChunks: Buffer[]
+  stderrChunks: Buffer[],
+  onSessionId: (sessionId: string) => void
 ): AsyncIterator<NormalizedMessage> {
   let done = false;
   const pendingQueue: NormalizedMessage[] = [];
@@ -402,9 +466,22 @@ function createMessageIterator(
     if (!trimmed) return;
     try {
       const parsed: unknown = JSON.parse(trimmed);
+      const extractedId = adapter.extractSessionId(parsed);
+      if (extractedId !== null) {
+        onSessionId(extractedId);
+      }
+      const eventType =
+        parsed && typeof parsed === 'object' && 'type' in parsed
+          ? String((parsed as { type?: unknown }).type)
+          : 'unknown';
+      devLog('provider.event', { provider: adapter.id, type: eventType });
       const normalized = adapter.normalizeStreamEvent(parsed);
       if (normalized !== null) {
         enqueue(normalized);
+      }
+      if (adapter.isTurnCompleteEvent(parsed)) {
+        devLog('provider.turn_complete', { provider: adapter.id, type: eventType });
+        onIteratorClose();
       }
     } catch {
       enqueue(systemMessage(`[${adapter.id}] JSONL parse error: ${trimmed.slice(0, 200)}`));

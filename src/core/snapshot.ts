@@ -10,7 +10,7 @@ import packageJson from '../../package.json';
 import { i18n } from '../i18n/index.js';
 import { fileExists } from '../utils/fs.js';
 import { getProviderLayout } from './layout.js';
-import { generateAndWriteLockfileForDir } from './lockfile.js';
+import { generateAndWriteLockfileForDir, runtimeLockfileStorage } from './lockfile.js';
 import { registerProject } from './registry.js';
 
 /**
@@ -119,7 +119,9 @@ export async function installFromSnapshot(
 
     // Update lock file
     try {
-      await generateAndWriteLockfileForDir(targetDir);
+      await generateAndWriteLockfileForDir(targetDir, {
+        storage: runtimeLockfileStorage(targetDir),
+      });
     } catch {
       // Non-blocking
     }

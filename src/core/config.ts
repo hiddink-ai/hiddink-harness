@@ -2,7 +2,7 @@
  * Configuration management module for Hiddink Harness
  */
 
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   ensureDirectory,
   fileExists,
@@ -199,7 +199,7 @@ export function getConfigPath(targetDir: string): string {
   ) {
     return join(targetDir, SHARED_CONFIG_FILE);
   }
-  const projectId = getProjectId(process.cwd());
+  const projectId = getProjectId(targetDir);
   return join(getProjectStateDir(projectId), SHARED_CONFIG_FILE);
 }
 
@@ -215,7 +215,7 @@ export function getLocalConfigPath(targetDir: string): string {
   ) {
     return join(targetDir, LOCAL_CONFIG_FILE);
   }
-  const projectId = getProjectId(process.cwd());
+  const projectId = getProjectId(targetDir);
   return join(getProjectStateDir(projectId), LOCAL_CONFIG_FILE);
 }
 
@@ -279,7 +279,7 @@ export async function saveConfig(targetDir: string, config: HiddinkConfig): Prom
   const configPath = getConfigPath(targetDir);
 
   // Ensure directory exists
-  await ensureDirectory(targetDir);
+  await ensureDirectory(dirname(configPath));
 
   // Update last updated timestamp
   config.lastUpdated = new Date().toISOString();
@@ -299,7 +299,7 @@ export async function saveLocalConfig(
   localConfig: HiddinkLocalConfig
 ): Promise<void> {
   const localPath = getLocalConfigPath(targetDir);
-  await ensureDirectory(targetDir);
+  await ensureDirectory(dirname(localPath));
   await writeJsonFile(localPath, localConfig);
   debug('config.local_saved', { path: localPath });
 }

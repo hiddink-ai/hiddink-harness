@@ -27,6 +27,7 @@ import {
   generateAndWriteLockfileForDir,
   type Lockfile,
   readLockfile,
+  runtimeLockfileStorage,
 } from './lockfile.js';
 import { installRtk, isRtkInstalled } from './rtk-installer.js';
 
@@ -553,7 +554,9 @@ async function updateProjectRegistry(targetDir: string, newVersion: string): Pro
  * Extracted to reduce cognitive complexity of update().
  */
 async function regenerateLockfile(targetDir: string, result: UpdateResult): Promise<void> {
-  const lockfileResult = await generateAndWriteLockfileForDir(targetDir);
+  const lockfileResult = await generateAndWriteLockfileForDir(targetDir, {
+    storage: runtimeLockfileStorage(targetDir),
+  });
   if (lockfileResult.warning) {
     result.warnings.push(lockfileResult.warning);
     warn('update.lockfile_failed', { error: lockfileResult.warning });
@@ -648,7 +651,9 @@ export async function update(options: UpdateOptions): Promise<UpdateResult> {
     );
 
     // Read lockfile for smart protected file handling
-    const lockfile = await readLockfile(options.targetDir);
+    const lockfile = await readLockfile(options.targetDir, {
+      storage: runtimeLockfileStorage(options.targetDir),
+    });
 
     // Update all components
     const components = options.components || getAllUpdateComponents();

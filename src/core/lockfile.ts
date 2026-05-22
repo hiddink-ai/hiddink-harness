@@ -10,13 +10,30 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import * as fs from 'node:fs/promises';
-import { join, relative } from 'node:path';
-import { fileExists, getPackageRoot, readJsonFile, writeJsonFile } from '../utils/fs.js';
+import { dirname, join, relative } from 'node:path';
+import {
+  ensureDirectory,
+  fileExists,
+  getPackageRoot,
+  readJsonFile,
+  writeJsonFile,
+} from '../utils/fs.js';
 import { debug, warn } from '../utils/logger.js';
+import { getProjectId, getProjectStateDir } from './global-state.js';
 import { getComponentPath, type InstallComponent } from './layout.js';
 
 export const LOCKFILE_NAME = '.hiddink.lock.json';
 export const LOCKFILE_VERSION = 1 as const;
+
+export type LockfileStorage = 'directory' | 'project-state';
+
+export interface LockfileStorageOptions {
+  /**
+   * directory: targetDir/.hiddink.lock.json (snapshots/tests/backcompat)
+   * project-state: ~/.hiddink-harness/projects/<project-id>/.hiddink.lock.json
+   */
+  storage?: LockfileStorage;
+}
 
 /**
  * Per-file entry in the lockfile
@@ -83,6 +100,25 @@ const COMPONENT_PATHS: ReadonlyArray<readonly [string, string]> = LOCKFILE_COMPO
   (component) => [getComponentPath(component), component] as const
 );
 
+export function getLockfilePath(targetDir: string, options: LockfileStorageOptions = {}): string {
+  if (options.storage === 'project-state') {
+    return join(getProjectStateDir(getProjectId(targetDir)), LOCKFILE_NAME);
+  }
+  return join(targetDir, LOCKFILE_NAME);
+}
+
+export function runtimeLockfileStorage(targetDir: string): LockfileStorage {
+  if (
+    targetDir.includes('/tmp/') ||
+    targetDir.includes('coverage/') ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.BUN_ENV === 'test'
+  ) {
+    return 'directory';
+  }
+  return 'project-state';
+}
+
 /**
  * Compute SHA-256 hash of a file using a read stream.
  * Returns lowercase hex digest.
@@ -110,8 +146,11 @@ export function computeFileHash(filePath: string): Promise<string> {
  * Read the lockfile from targetDir.
  * Returns null if the file does not exist or has an invalid lockfileVersion.
  */
-export async function readLockfile(targetDir: string): Promise<Lockfile | null> {
-  const lockfilePath = join(targetDir, LOCKFILE_NAME);
+export async function readLockfile(
+  targetDir: string,
+  options: LockfileStorageOptions = {}
+): Promise<Lockfile | null> {
+  const lockfilePath = getLockfilePath(targetDir, options);
 
   const exists = await fileExists(lockfilePath);
   if (!exists) {
@@ -147,8 +186,13 @@ export async function readLockfile(targetDir: string): Promise<Lockfile | null> 
 /**
  * Write a lockfile to targetDir with 2-space indented JSON.
  */
-export async function writeLockfile(targetDir: string, lockfile: Lockfile): Promise<void> {
-  const lockfilePath = join(targetDir, LOCKFILE_NAME);
+export async function writeLockfile(
+  targetDir: string,
+  lockfile: Lockfile,
+  options: LockfileStorageOptions = {}
+): Promise<void> {
+  const lockfilePath = getLockfilePath(targetDir, options);
+  await ensureDirectory(dirname(lockfilePath));
   await writeJsonFile(lockfilePath, lockfile);
   debug('lockfile.written', { path: lockfilePath });
 }
@@ -291,7 +335,8 @@ export async function generateLockfile(
  * Non-throwing: returns warnings array on failure.
  */
 export async function generateAndWriteLockfileForDir(
-  targetDir: string
+  targetDir: string,
+  options: LockfileStorageOptions = {}
 ): Promise<{ fileCount: number; warning?: string }> {
   try {
     const packageRoot = getPackageRoot();
@@ -302,7 +347,7 @@ export async function generateAndWriteLockfileForDir(
       join(packageRoot, 'package.json')
     );
     const lockfile = await generateLockfile(targetDir, generatorVersion, manifest.version);
-    await writeLockfile(targetDir, lockfile);
+    await writeLockfile(targetDir, lockfile, options);
     return { fileCount: Object.keys(lockfile.files).length };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

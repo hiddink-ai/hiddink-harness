@@ -20,7 +20,7 @@ export type ProviderId = 'claude' | 'codex' | 'agy' | 'kimi';
  *   interactively over stdin/stdout (claude, kimi).
  * - `per-turn-resume`: A fresh subprocess is spawned for every turn and
  *   re-attached to an existing thread via `--resume <thread_id>` (codex).
- * - `pty-wrap`: PTY-based wrapping — reserved for Phase 2 (agy). NOT used in MVP.
+ * - `pty-wrap`: PTY-based wrapping — reserved for future interactive wrappers.
  */
 export type ProviderLifecycle = 'persistent-bidirectional' | 'per-turn-resume' | 'pty-wrap';
 

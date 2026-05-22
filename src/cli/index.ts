@@ -16,6 +16,7 @@ import {
 import { formatPreflightWarnings, runPreflightCheck } from '../core/preflight.js';
 import { maybeHandleSelfUpdateForCommand } from '../core/self-update.js';
 import { detectLanguage, i18n, initI18n } from '../i18n/index.js';
+import { devLog } from '../utils/dev-log.js';
 import { doctorCommand } from './doctor.js';
 import { listCommand } from './list.js';
 import { securityCommand } from './security.js';
@@ -36,6 +37,7 @@ export function createProgram(): Command {
     .option('--skip-self-update', 'Skip hiddink-harness self-update check')
     .action(async () => {
       const cwd = process.cwd();
+      devLog('cli.tui.start', { cwd, argv: process.argv.slice(2) });
       const projectId = getProjectId(cwd);
 
       const isTest =
@@ -51,11 +53,22 @@ export function createProgram(): Command {
         registerCleanupHandlers(projectId, cwd);
       }
 
+      // Batch Ink renders into a single frame to reduce flicker
+      process.env.INK_FLUSH_BUFFERED_RENDERS = '1';
+
       const { render } = await import('ink');
       const React = await import('react');
       const { HiddinkTuiDashboard } = await import('./ui/Dashboard.js');
 
-      render(React.createElement(HiddinkTuiDashboard, { cwd }));
+      process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H');
+
+      const app = render(React.createElement(HiddinkTuiDashboard, { cwd }), {
+        patchConsole: false,
+        exitOnCtrlC: true,
+      });
+
+      await app.waitUntilExit();
+      devLog('cli.tui.exit', { cwd });
     });
 
   // hiddink-harness list [type] [--format table|json|simple]
@@ -180,6 +193,7 @@ async function main(): Promise<void> {
 
 // Run main if this is the entry point
 main().catch((error) => {
+  devLog('cli.fatal', { error });
   console.error(i18n.t('cli.error.unexpected'), error);
   process.exit(1);
 });

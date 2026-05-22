@@ -11,7 +11,7 @@ import { getCodexVersion, installCodex, isCodexInstalled } from '../core/codex-i
 import { loadConfig } from '../core/config.js';
 import { checkFrameworkVersion } from '../core/doctor-framework.js';
 import { getProviderLayout } from '../core/layout.js';
-import { computeFileHash, readLockfile } from '../core/lockfile.js';
+import { computeFileHash, readLockfile, runtimeLockfileStorage } from '../core/lockfile.js';
 import { getRtkVersion, installRtk, isRtkInstalled } from '../core/rtk-installer.js';
 import { checkSelfUpdate } from '../core/self-update.js';
 import { i18n } from '../i18n/index.js';
@@ -809,7 +809,9 @@ function readCurrentVersion(): string {
  * @returns Check result indicating lockfile drift status, or null if no lockfile exists
  */
 export async function checkLockfileDrift(targetDir: string): Promise<CheckResult | null> {
-  const lockfile = await readLockfile(targetDir);
+  const lockfile = await readLockfile(targetDir, {
+    storage: runtimeLockfileStorage(targetDir),
+  });
 
   if (!lockfile) {
     return null;

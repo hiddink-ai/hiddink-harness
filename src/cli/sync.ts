@@ -9,6 +9,7 @@
 
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
+import { runtimeLockfileStorage } from '../core/lockfile.js';
 import { exportSnapshot, type SyncCheckResult, syncCheck } from '../core/sync.js';
 import { i18n } from '../i18n/index.js';
 
@@ -71,7 +72,10 @@ function printDriftDetails(result: SyncCheckResult): void {
  * Exits with code 1 when drift is detected (enables CI usage).
  */
 async function runCheck(targetDir: string, options: SyncOptions): Promise<void> {
-  const result = await syncCheck(targetDir, { reference: options.reference });
+  const result = await syncCheck(targetDir, {
+    reference: options.reference,
+    lockfileStorage: runtimeLockfileStorage(targetDir),
+  });
 
   if (!result.referenceVersion) {
     console.error('\nNo lockfile found. Run hiddink-harness init first.');

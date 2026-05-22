@@ -303,6 +303,48 @@ class AlreadyDeadAdapter extends BashAdapter {
   }
 }
 
+/**
+ * DeferredInitAdapter: mirrors CLIs that do not emit init until the first
+ * JSONL user message is written.
+ */
+class DeferredInitAdapter extends BashAdapter {
+  protected override readonly waitForSessionInitBeforeSpawn = false;
+
+  protected override getProvisionalSessionId(): string {
+    return 'provisional-session';
+  }
+
+  buildSpawnCommand(_opts: SpawnOptions): SpawnCommand {
+    const script = [
+      'read line',
+      'printf \'{"type":"init","session_id":"deferred-session"}\\n\'',
+      'printf \'{"type":"text","content":"after-init"}\\n\'',
+    ].join('\n');
+    return { cmd: 'bash', args: ['-c', script] };
+  }
+}
+
+class MultiTurnResultAdapter extends BashAdapter {
+  override isTurnCompleteEvent(event: unknown): boolean {
+    return Boolean(
+      event && typeof event === 'object' && (event as Record<string, unknown>).type === 'result'
+    );
+  }
+
+  buildSpawnCommand(_opts: SpawnOptions): SpawnCommand {
+    const script = [
+      'printf \'{"type":"init","session_id":"multi-turn-session"}\\n\'',
+      'read line',
+      'printf \'{"type":"text","content":"first"}\\n\'',
+      'printf \'{"type":"result","subtype":"success"}\\n\'',
+      'read line',
+      'printf \'{"type":"text","content":"second"}\\n\'',
+      'printf \'{"type":"result","subtype":"success"}\\n\'',
+    ].join('\n');
+    return { cmd: 'bash', args: ['-c', script] };
+  }
+}
+
 describe('StreamJsonAdapterBase — real spawn() lifecycle', () => {
   it('spawns real process, receives session ID, sends message, gets response', async () => {
     const adapter = new BashAdapter();
@@ -315,6 +357,32 @@ describe('StreamJsonAdapterBase — real spawn() lifecycle', () => {
     expect(messages.length).toBeGreaterThan(0);
     expect(messages[0]?.role).toBe('assistant');
     expect(messages[0]?.content).toBe('pong');
+
+    await session.close();
+  });
+
+  it('can return before init and capture session ID during first send', async () => {
+    const adapter = new DeferredInitAdapter();
+    const session = await adapter.spawn({ sessionId: 'x', cwd: '/tmp', systemPrompt: '' });
+
+    expect(session.id).toBe('provisional-session');
+
+    const messages = await collectMessages(session.send('ping'));
+    expect(session.id).toBe('deferred-session');
+    expect(messages.some((m) => m.content === 'after-init')).toBe(true);
+
+    await session.close();
+  });
+
+  it('completes one turn on provider result events and accepts a second send', async () => {
+    const adapter = new MultiTurnResultAdapter();
+    const session = await adapter.spawn({ sessionId: 'x', cwd: '/tmp', systemPrompt: '' });
+
+    const first = await collectMessages(session.send('one'));
+    expect(first.map((m) => m.content)).toContain('first');
+
+    const second = await collectMessages(session.send('two'));
+    expect(second.map((m) => m.content)).toContain('second');
 
     await session.close();
   });

@@ -1,0 +1,10 @@
+[package]
+name = "hiddink-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 1 ratatui scaffold for hiddink-harness"
+publish = false
+
+[dependencies]
+crossterm = "0.29.0"
+ratatui = "0.30.0"
