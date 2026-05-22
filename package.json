@@ -4,7 +4,7 @@
     "packages/eval-core",
     "packages/memory-mcp-server"
   ],
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Universal agent harness for Claude Code, agy, gpt-codex, and Kimi",
   "type": "module",
   "bin": {
