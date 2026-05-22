@@ -58,24 +58,46 @@ export function bumpVersion(root: string, arg: string): BumpResult {
   return { previous: currentPkg, next, pkgPath, manifestPath };
 }
 
-if (import.meta.main) {
-  const arg = process.argv[2];
+export interface CliIO {
+  argv: string[];
+  env: Record<string, string | undefined>;
+  defaultRoot: string;
+  log: (msg: string) => void;
+  error: (msg: string) => void;
+}
+
+export function runCli(io: CliIO): number {
+  const arg = io.argv[0];
   if (!arg) {
-    console.error('usage: bun scripts/bump-version.ts <version|patch|minor|major>');
-    process.exit(2);
+    io.error('usage: bun scripts/bump-version.ts <version|patch|minor|major>');
+    return 2;
   }
-  const root = process.env.BUMP_VERSION_ROOT ?? resolve(import.meta.dir, '..');
+  const root = io.env.BUMP_VERSION_ROOT ?? io.defaultRoot;
   try {
     const r = bumpVersion(root, arg);
-    console.log(`✓ version bumped: ${r.previous} → ${r.next}`);
-    console.log('  - package.json');
-    console.log('  - templates/manifest.json');
-    console.log('');
-    console.log(
+    io.log(`✓ version bumped: ${r.previous} → ${r.next}`);
+    io.log('  - package.json');
+    io.log('  - templates/manifest.json');
+    io.log('');
+    io.log(
       `Next: git add package.json templates/manifest.json && git commit -m "chore(release): bump version to ${r.next}"`
     );
+    return 0;
   } catch (err) {
-    console.error((err as Error).message);
-    process.exit(2);
+    io.error((err as Error).message);
+    return 2;
   }
 }
+
+/* c8 ignore start -- CLI bootstrap; runCli() is fully covered by unit tests */
+if (import.meta.main) {
+  const code = runCli({
+    argv: process.argv.slice(2),
+    env: process.env,
+    defaultRoot: resolve(import.meta.dir, '..'),
+    log: console.log,
+    error: console.error,
+  });
+  if (code !== 0) process.exit(code);
+}
+/* c8 ignore stop */
